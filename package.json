@@ -1,0 +1,35 @@
+{
+  "name": "multi-agent-review",
+  "version": "0.1.0",
+  "description": "Vendor-neutral orchestration of frontier-model CLIs through a structured adversarial review protocol.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "mar": "./dist/cli.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "dev": "tsx src/cli.ts",
+    "build": "tsc",
+    "lint": "biome check .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "commander": "^15",
+    "execa": "^9",
+    "fs-extra": "^11",
+    "nanoid": "^5",
+    "pino": "^10",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2",
+    "@types/fs-extra": "^11",
+    "@types/node": "^25",
+    "tsx": "^4",
+    "typescript": "^6",
+    "vitest": "^4"
+  }
+}
