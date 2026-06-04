@@ -17,6 +17,11 @@ export interface InvocationRecord {
   timedOut: boolean;
   /** Path to the normalized output artifact (absent on failure with no artifact). */
   artifactPath?: string;
+  /**
+   * 1-based attempt number — every attempt incl. failures gets its own record (D-25).
+   * A retried invocation produces multiple records (attempt 1, 2, ...), one per `withRetry` pass.
+   */
+  attempt: number;
 }
 
 const FILE_NAME = "invocations.ndjson";
