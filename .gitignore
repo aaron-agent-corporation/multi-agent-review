@@ -1,6 +1,7 @@
 node_modules/
 dist/
 runs/
+.mar/
 
 # logs / coverage / editor noise
 *.log
