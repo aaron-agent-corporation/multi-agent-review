@@ -74,7 +74,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 02-04-PLAN.md — tiered pre-flight (version + live probe) + cache + hints (ORCH-05)
+- [x] 02-04-PLAN.md — tiered pre-flight (version + live probe) + cache + hints (ORCH-05)
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
-| 2. Adapter Layer + Roster + Pre-flight | 3/5 | In Progress|  |
+| 2. Adapter Layer + Roster + Pre-flight | 4/5 | In Progress|  |
 | 3. Protocol Engine + Independence Enforcement | 0/TBD | Not started | - |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |
