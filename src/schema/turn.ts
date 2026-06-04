@@ -30,10 +30,7 @@ export type ClaudeJson = z.infer<typeof ClaudeJson>;
 export const CodexEvent = z
   .object({
     type: z.string(),
-    item: z
-      .object({ type: z.string(), text: z.string().optional() })
-      .partial()
-      .optional(),
+    item: z.object({ type: z.string(), text: z.string().optional() }).partial().optional(),
     error: z.object({ message: z.string() }).partial().optional(),
     message: z.string().optional(),
     usage: z.unknown().optional(),

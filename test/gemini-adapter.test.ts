@@ -119,15 +119,7 @@ describe("makeGeminiAdapter (against fake-gemini fixture)", () => {
     await adapter.invoke(req("hi"));
 
     const [, argv] = execaMock.mock.calls[0];
-    expect(argv).toEqual([
-      "-p",
-      "hi",
-      "--output-format",
-      "json",
-      "--skip-trust",
-      "-m",
-      "flash",
-    ]);
+    expect(argv).toEqual(["-p", "hi", "--output-format", "json", "--skip-trust", "-m", "flash"]);
 
     vi.doUnmock("execa");
     vi.resetModules();
