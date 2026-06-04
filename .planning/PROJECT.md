@@ -16,6 +16,10 @@ Differently-trained frontier models catch each other's blind spots — the syste
 - [x] Deterministically named artifacts in manifest-indexed `runs/<id>/` workspace; artifact trail authoritative (PROT-02, PROT-07) — Validated in Phase 1
 - [x] Every invocation logged with command, prompt reference, exit code, duration, output location (ORCH-06) — Validated in Phase 1
 - [x] Hung invocations bounded by external wall-clock timeout — Validated in Phase 1
+- [x] All three vendor CLIs (claude, codex, gemini) invoked through one uniform `AgentAdapter` contract via a vendor→adapter registry (ORCH-03) — Validated in Phase 2: Adapter Layer + Roster + Pre-flight
+- [x] Configurable roster (`mar.config.json`) with vendor-distinctness gate refusing <2 distinct vendors (ORCH-04) — Validated in Phase 2
+- [x] Transient failures retried with bounded exponential backoff, every attempt audit-logged (ORCH-02) — Validated in Phase 2
+- [x] Tiered pre-flight (install check + live probe) surfaces CLI problems with actionable hints before a run (ORCH-05) — Validated in Phase 2 (live-verified: claude ✓, codex ✓, gemini correctly flagged for headless auth)
 
 ### Active
 
@@ -84,4 +88,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-04 after Phase 1 completion (Workspace + First Adapter — mar invoke slice live-verified against claude 2.1.162)*
+*Last updated: 2026-06-04 after Phase 2 completion (Adapter Layer + Roster + Pre-flight — 3-vendor registry, retry, roster gates, and pre-flight live-verified; codex stdin-hang fixed)*
