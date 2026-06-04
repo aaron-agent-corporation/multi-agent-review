@@ -86,13 +86,35 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmap) | | |
+| ORCH-01 | Phase 1 | Pending |
+| ORCH-06 | Phase 1 | Pending |
+| PROT-02 | Phase 1 | Pending |
+| PROT-07 | Phase 1 | Pending |
+| ORCH-02 | Phase 2 | Pending |
+| ORCH-03 | Phase 2 | Pending |
+| ORCH-04 | Phase 2 | Pending |
+| ORCH-05 | Phase 2 | Pending |
+| PROT-01 | Phase 3 | Pending |
+| PROT-03 | Phase 3 | Pending |
+| PROT-04 | Phase 3 | Pending |
+| REVW-01 | Phase 4 | Pending |
+| REVW-02 | Phase 4 | Pending |
+| REVW-03 | Phase 4 | Pending |
+| REVW-04 | Phase 4 | Pending |
+| REVW-05 | Phase 4 | Pending |
+| RSLV-01 | Phase 4 | Pending |
+| RCRD-01 | Phase 4 | Pending |
+| PROT-05 | Phase 5 | Pending |
+| PROT-06 | Phase 5 | Pending |
+| RSLV-02 | Phase 5 | Pending |
+| RSLV-03 | Phase 5 | Pending |
+| RCRD-02 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 23 total
-- Mapped to phases: 0
-- Unmapped: 23 ⚠️ (pre-roadmap)
+- Mapped to phases: 23 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-04*
-*Last updated: 2026-06-04 after initial definition*
+*Last updated: 2026-06-04 after roadmap creation (traceability populated)*
