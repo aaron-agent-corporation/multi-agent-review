@@ -213,6 +213,7 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     durationMs: turn.durationMs,
     timedOut: turn.timedOut,
     artifactPath: artifactRel,
+    attempt: 1, // single (un-retried) mar-invoke path — always the first and only attempt (D-25)
   });
 
   // 7. Console: ONE human-readable progress line — never the raw JSON (D-08 / T-01-11).
