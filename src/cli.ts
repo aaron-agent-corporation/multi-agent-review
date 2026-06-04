@@ -3,13 +3,23 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "n
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { execa } from "execa";
-import { makeClaudeAdapter, splitBin } from "./adapters/claude.js";
+import { splitBin } from "./adapters/common.js";
+import { makeAdapter } from "./adapters/registry.js";
+import { loadConfig, resolveAgent } from "./config.js";
+import { detectVendors, writeStarterConfig } from "./init.js";
 import { logInvocation } from "./log/invocation.js";
+import { extractVersion, formatStatusLines, runPreflight } from "./preflight.js";
+import {
+  type Classify,
+  classifyClaude,
+  classifyCodex,
+  classifyGemini,
+  withRetry,
+} from "./retry.js";
+import type { AgentEntry } from "./schema/config.js";
 import { writeArtifact } from "./workspace/artifacts.js";
 import { artifactPath, newRunId, nextSeq, runDir as runDirFor } from "./workspace/layout.js";
 import { addArtifact, createRun, readManifest, setStatus } from "./workspace/manifest.js";
-
-const DEFAULT_TIMEOUT_MS = 600_000; // 10 min (D-17)
 
 // WR-05: cap a prompt FILE read at 10 MB, matching claude's stdin cap (claude 2.1.128+). A
 // value larger than this is treated as an error rather than silently streamed to the model.
@@ -29,6 +39,13 @@ interface InvokeOptions {
 type ResolvedPrompt =
   | { ok: true; promptText: string; promptRef: string }
   | { ok: false; error: string };
+
+/** Per-vendor transient-vs-fatal classifier for the withRetry wrapper (D-22/D-24). */
+const CLASSIFY: Record<AgentEntry["vendor"], Classify> = {
+  claude: classifyClaude,
+  codex: classifyCodex,
+  gemini: classifyGemini,
+};
 
 /**
  * Resolve --prompt: if the value names an existing REGULAR file, read its content (bounded to
@@ -58,20 +75,25 @@ export function resolvePrompt(value: string): ResolvedPrompt {
 }
 
 /**
- * Parse + validate a `--timeout` value into milliseconds (WR-02). Returns the default when no
- * value is supplied, the validated integer when valid, or `null` when the value is malformed
- * (trailing garbage like "500abc", exponential/fractional forms like "1e3", non-positive, or
- * non-integer). Uses `Number` (not `parseInt`) so the WHOLE string must be a clean integer.
+ * Parse + validate a `--timeout` value into milliseconds (WR-02). Returns `undefined` when no
+ * value is supplied (caller falls back to the roster's effective timeout), the validated integer
+ * when valid, or `null` when the value is malformed (trailing garbage like "500abc",
+ * exponential/fractional forms like "1e3", non-positive, or non-integer). Uses `Number` (not
+ * `parseInt`) so the WHOLE string must be a clean integer.
  */
-export function parseTimeout(value: string | undefined): number | null {
-  if (value === undefined) return DEFAULT_TIMEOUT_MS;
+export function parseTimeout(value: string | undefined): number | null | undefined {
+  if (value === undefined) return undefined;
   const ms = Number(value);
   if (!Number.isInteger(ms) || ms <= 0) return null;
   return ms;
 }
 
-/** Best-effort `claude --version` detection; "unknown" if the binary is absent/errors. */
-async function detectClaudeVersion(bin: string): Promise<string> {
+/**
+ * Best-effort `<bin> --version` detection → extracted semver, "unknown" if the binary is
+ * absent/errors. Uses `extractVersion` (Plan 04) so codex's two-token `codex-cli 0.128.0` and
+ * gemini's bare `0.45.0` are captured correctly (Pitfall 2 — never `split()[0]`).
+ */
+async function detectVersion(bin: string): Promise<string> {
   try {
     // Reuse the adapter's single-split strategy (WR-01): splitting on every whitespace run
     // would break an injected bin whose path contains spaces (e.g. "Active Projects/…").
@@ -81,29 +103,37 @@ async function detectClaudeVersion(bin: string): Promise<string> {
       timeout: 10_000,
     });
     const out = (r.stdout ?? "").trim();
-    return out.length > 0 ? out.split(/\s+/)[0] : "unknown";
+    return out.length > 0 ? extractVersion(out) : "unknown";
   } catch {
     return "unknown";
   }
 }
 
 async function runInvoke(opts: InvokeOptions): Promise<number> {
-  // 1. Validate --agent. Multi-vendor (codex/gemini) is Phase 2.
-  if (opts.agent !== "claude") {
-    process.stderr.write(
-      `error: unsupported --agent "${opts.agent}" — only "claude" is supported in this phase\n`,
-    );
+  // 1. Load the roster and resolve the agent by NAME (D-20). Missing roster / unknown name are
+  //    clear exit-2 errors. `mar invoke` is EXEMPT from the >=2-vendor gate and does NOT
+  //    auto-preflight (D-27/D-29) — neither runPreflight nor assertReviewable is called here.
+  let entry: AgentEntry;
+  let config: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    config = await loadConfig();
+    entry = resolveAgent(config, opts.agent);
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 2;
   }
 
-  const bin = process.env.MAR_CLAUDE_BIN ?? "claude";
+  const bin = entry.bin ?? entry.vendor; // production default = bare vendor name
   // WR-02: validate the WHOLE string so trailing garbage ("500abc") and sub-millisecond forms
-  // ("1e3" → 1) are rejected instead of silently truncated.
-  const timeoutMs = parseTimeout(opts.timeout);
-  if (timeoutMs === null) {
+  // ("1e3" → 1) are rejected instead of silently truncated. No --timeout → the roster's effective
+  // timeout (entry override ?? config default).
+  const parsedTimeout = parseTimeout(opts.timeout);
+  if (parsedTimeout === null) {
     process.stderr.write(`error: --timeout must be a positive integer (ms)\n`);
     return 2;
   }
+  const timeoutMs = parsedTimeout ?? entry.timeoutMs ?? config.defaults.timeoutMs;
+  const retries = config.defaults.retries;
 
   // 2. Resolve the prompt (file-or-string); keep a loggable reference, not the body. A prompt
   // file read is bounded (WR-05): an oversize file is a hard error, never silently sent.
@@ -142,7 +172,7 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     // WR-03: refuse to overwrite an existing artifact at the computed slot. nextSeq is monotonic
     // so this should never trigger, but the guard makes overwrite impossible rather than relying
     // on the atomic write to silently clobber.
-    if (existsSync(artifactPath(runDir, seq, "claude"))) {
+    if (existsSync(artifactPath(runDir, seq, entry.name))) {
       process.stderr.write(`error: artifact slot ${seq} already exists in run "${runId}"\n`);
       return 2;
     }
@@ -150,31 +180,58 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     runId = newRunId();
     runDir = runDirFor(runId);
     seq = 1;
-    const claudeVersion = await detectClaudeVersion(bin);
+    // Capture the per-vendor CLI version with the Pitfall-2-safe extractor (fixes the codex
+    // "codex-cli" bug) keyed by VENDOR so the manifest reports e.g. cliVersions.codex.
+    const version = await detectVersion(bin);
     await createRun({
       runDir,
       runId,
-      cliVersions: { claude: claudeVersion },
+      cliVersions: { [entry.vendor]: version },
       status: "running",
     });
   }
 
-  // 4. Drive the claude adapter with a wall-clock timeout (D-17 / T-01-12).
-  const adapter = makeClaudeAdapter(bin);
-  const turn = await adapter.invoke({
-    agent: "claude",
-    promptText,
-    runDir,
-    seq,
-    timeoutMs,
-  });
+  // 4. Drive the roster-resolved adapter, wrapped in the ONE vendor-agnostic retry seam (D-24).
+  //    EVERY attempt — including failures — is logged with its 1-based attempt number (D-25) via
+  //    the onAttempt callback. Persistence below branches ONLY on the FINAL turn.ok (T-01-13).
+  const adapter = makeAdapter(entry.vendor, entry.bin, entry.model);
+  const baseMs = numEnv("MAR_RETRY_BASE_MS");
+  const maxMs = numEnv("MAR_RETRY_MAX_MS");
+  const turn = await withRetry(
+    () =>
+      adapter.invoke({
+        agent: entry.name,
+        promptText,
+        runDir,
+        seq,
+        timeoutMs,
+      }),
+    {
+      retries,
+      classify: CLASSIFY[entry.vendor],
+      ...(baseMs !== undefined ? { baseMs } : {}),
+      ...(maxMs !== undefined ? { maxMs } : {}),
+      // Log EVERY attempt (incl. failures) — the command logged is the adapter's OWN redacted argv
+      // (WR-04), the prompt body is never present, and promptRef carries the loggable reference
+      // separately (D-15/D-25).
+      onAttempt: (t, attempt) =>
+        logInvocation(runDir, {
+          command: t.redactedCommand,
+          promptRef,
+          exitCode: t.exitCode,
+          durationMs: t.durationMs,
+          timedOut: t.timedOut,
+          attempt,
+        }),
+    },
+  );
 
   let artifactRel: string | undefined;
   let exitCode: number;
 
-  // 5. Persist outcome — branch ONLY on turn.ok (T-01-13: CLI never re-derives success).
+  // 5. Persist outcome — branch ONLY on the FINAL turn.ok (T-01-13: CLI never re-derives success).
   if (turn.ok) {
-    const written = await writeArtifact(runDir, seq, "claude", {
+    const written = await writeArtifact(runDir, seq, entry.name, {
       text: turn.text,
       raw: turn,
       frontmatter: {
@@ -186,7 +243,7 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     const relPath = written.path.slice(runDir.length + 1);
     await addArtifact(runDir, {
       path: relPath,
-      agent: "claude",
+      agent: entry.name,
       seq,
       kind: "output",
       createdAt: new Date().toISOString(),
@@ -202,30 +259,62 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     exitCode = 1;
   }
 
-  // 6. ALWAYS log the invocation — even on failure (ORCH-06). The command logged is the adapter's
-  // OWN redacted argv (WR-04): one source of truth shared with the spawn, never a hand-rebuilt
-  // literal that can drift from the real flags. The prompt body is already redacted by the
-  // adapter; promptRef carries the loggable reference separately (D-15).
-  logInvocation(runDir, {
-    command: turn.redactedCommand,
-    promptRef,
-    exitCode: turn.exitCode,
-    durationMs: turn.durationMs,
-    timedOut: turn.timedOut,
-    artifactPath: artifactRel,
-    attempt: 1, // single (un-retried) mar-invoke path — always the first and only attempt (D-25)
-  });
-
-  // 7. Console: ONE human-readable progress line — never the raw JSON (D-08 / T-01-11).
+  // 6. Console: ONE human-readable progress line — never the raw JSON (D-08 / T-01-11).
   const secs = (turn.durationMs / 1000).toFixed(1);
   if (turn.ok) {
-    process.stdout.write(`claude ✓  ${secs}s  exit ${turn.exitCode}  → ${runDir}/${artifactRel}\n`);
+    process.stdout.write(
+      `${entry.vendor} ✓  ${secs}s  exit ${turn.exitCode}  → ${runDir}/${artifactRel}\n`,
+    );
   } else {
     const reason = turn.timedOut ? "timeout" : (turn.error ?? "failed");
-    process.stdout.write(`claude ✗  ${secs}s  exit ${turn.exitCode}  (${reason})\n`);
+    process.stdout.write(`${entry.vendor} ✗  ${secs}s  exit ${turn.exitCode}  (${reason})\n`);
   }
 
   return exitCode;
+}
+
+/** Read a non-negative integer env var for test-only backoff injection; undefined if unset/invalid. */
+function numEnv(name: string): number | undefined {
+  const v = process.env[name];
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/** `mar init` — probe PATH, write a starter roster, print a one-line detected-vendor summary (D-21). */
+async function runInit(): Promise<number> {
+  const vendors = detectVendors();
+  if (vendors.length === 0) {
+    process.stderr.write(
+      "error: no supported vendor CLI (claude/codex/gemini) found on PATH — install one and re-run `mar init`\n",
+    );
+    return 1;
+  }
+  await writeStarterConfig("mar.config.json", vendors);
+  process.stdout.write(`wrote mar.config.json — detected vendors: ${vendors.join(", ")}\n`);
+  return 0;
+}
+
+/**
+ * `mar preflight` — load the roster, run the tiered check, print the status table, and map
+ * allPass → exit 0 / any-fail → exit 1 (D-28). `mar preflight` is the EXPLICIT preflight trigger
+ * (run-start auto-preflight is Phase 3 — D-27). The business logic lives in preflight.ts; the CLI
+ * stays thin.
+ */
+async function runPreflightCmd(): Promise<number> {
+  let agents: AgentEntry[];
+  try {
+    const config = await loadConfig();
+    agents = config.agents;
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+  const { results, allPass } = await runPreflight(agents);
+  for (const line of formatStatusLines(results)) {
+    process.stdout.write(`${line}\n`);
+  }
+  return allPass ? 0 : 1;
 }
 
 export function buildProgram(): Command {
@@ -235,13 +324,32 @@ export function buildProgram(): Command {
   program
     .command("invoke")
     .description("Invoke an agent CLI and capture its output as a normalized run artifact")
-    .requiredOption("--agent <name>", 'agent to invoke (only "claude" this phase)')
+    .requiredOption(
+      "--agent <name>",
+      "roster agent name to invoke (resolved against mar.config.json)",
+    )
     .requiredOption("--prompt <value>", "prompt file path OR literal prompt string")
     .option("--run <id>", "append to an existing run instead of creating a new one")
-    .option("--timeout <ms>", "wall-clock timeout in milliseconds (default 600000)")
+    .option(
+      "--timeout <ms>",
+      "wall-clock timeout in milliseconds (default: roster effective timeout)",
+    )
     .action(async (opts: InvokeOptions) => {
-      const code = await runInvoke(opts);
-      process.exitCode = code;
+      process.exitCode = await runInvoke(opts);
+    });
+
+  program
+    .command("init")
+    .description("Detect installed vendor CLIs and write a starter mar.config.json roster")
+    .action(async () => {
+      process.exitCode = await runInit();
+    });
+
+  program
+    .command("preflight")
+    .description("Check each roster agent (installed/responsive) and print a status table")
+    .action(async () => {
+      process.exitCode = await runPreflightCmd();
     });
 
   return program;

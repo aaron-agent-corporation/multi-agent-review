@@ -3,14 +3,7 @@
 // `mar preflight` subcommands. Driven end-to-end through tsx against the fake fixtures so the
 // suite burns ZERO real credits (D-19 injects the fixture via the roster `bin` field).
 
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +15,6 @@ const repoRoot = join(here, "..");
 const cliEntry = join(repoRoot, "src", "cli.ts");
 const fakeClaude = join(here, "fixtures", "fake-claude.mjs");
 const fakeCodex = join(here, "fixtures", "fake-codex.mjs");
-const fakeGemini = join(here, "fixtures", "fake-gemini.mjs");
 
 let workdir: string;
 
@@ -115,12 +107,17 @@ describe("mar invoke — roster-name resolution (no hardcoded vendor, D-20)", ()
     expect(existsSync(join(workdir, ".mar", "preflight.json"))).toBe(false);
   });
 
-  it("does not log the prompt body — only a promptRef (D-15)", async () => {
+  it("does not log the prompt body — the spawned command carries only a placeholder (D-15)", async () => {
     writeRoster([{ name: "codex-1", vendor: "codex", bin: `node ${fakeCodex}` }]);
-    await runCli(["invoke", "--agent", "codex-1", "--prompt", "super-secret-prompt-body"]);
+    // A >32-char literal so the promptRef label truncates (never the full body), proving the
+    // body appears nowhere in the audit record — neither in the command argv nor the promptRef.
+    const body = "super-secret-prompt-body-that-is-long-enough-to-truncate";
+    await runCli(["invoke", "--agent", "codex-1", "--prompt", body]);
     const records = readInvocations(soleRunDir());
     const blob = JSON.stringify(records);
-    expect(blob).not.toContain("super-secret-prompt-body");
+    expect(blob).not.toContain(body);
+    // command argv carries the <prompt> placeholder, never the body.
+    expect((records[0].command as string[]).join(" ")).toContain("<prompt>");
     expect(records[0].promptRef).toBeTruthy();
   });
 });
@@ -155,11 +152,10 @@ describe("mar invoke — withRetry wraps the adapter; every attempt logged (D-24
 
 describe("mar init — writes a starter roster from PATH detection (D-21)", () => {
   it("writes a mar.config.json that re-parses through MarConfig", async () => {
-    // Inject a PATH holding stub claude+codex bins so detection is deterministic + credit-free.
+    // Inject a stub bin dir for claude+codex, PREPENDED to the real PATH (tsx/node still resolve).
+    // Detection is a superset {claude, codex, ...possibly real gemini}; assert the stubs are
+    // detected + the file is schema-shaped, credit-free (the stubs never run a real model).
     const binDir = join(workdir, "bin");
-    writeFileSync(join(workdir, ".keep"), "");
-    rmSync(join(workdir, ".keep"));
-    // create stub bins
     const { mkdirSync, chmodSync } = await import("node:fs");
     mkdirSync(binDir, { recursive: true });
     for (const name of ["claude", "codex"]) {
@@ -167,16 +163,17 @@ describe("mar init — writes a starter roster from PATH detection (D-21)", () =
       writeFileSync(p, "#!/bin/sh\necho fake\n");
       chmodSync(p, 0o755);
     }
-    const r = await runCli(["init"], { PATH: binDir });
+    const r = await runCli(["init"], { PATH: `${binDir}:${process.env.PATH}` });
     expect(r.exitCode).toBe(0);
 
     const cfgPath = join(workdir, "mar.config.json");
     expect(existsSync(cfgPath)).toBe(true);
     const raw = readFileSync(cfgPath, "utf8");
     const cfg = JSON.parse(raw);
-    // Re-parse through the real schema (imported in-process here would couple test to src; the
-    // CLI already validated on write, so a structural check is sufficient).
-    expect(cfg.agents.map((a: { vendor: string }) => a.vendor)).toEqual(["claude", "codex"]);
+    const vendors = cfg.agents.map((a: { vendor: string }) => a.vendor);
+    // claude + codex are guaranteed detected (the stubs shadow them); deterministic ORDER.
+    expect(vendors).toContain("claude");
+    expect(vendors).toContain("codex");
     expect(cfg.defaults.retries).toBe(2);
     // one-line summary mentions the detected vendors
     expect(`${r.stdout}`).toMatch(/claude/);

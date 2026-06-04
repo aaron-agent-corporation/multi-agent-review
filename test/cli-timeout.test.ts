@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { parseTimeout } from "../src/cli.js";
 
 describe("parseTimeout (WR-02: strict whole-string validation)", () => {
-  it("returns the default (600000) when no value is supplied", () => {
-    expect(parseTimeout(undefined)).toBe(600_000);
+  it("returns undefined when no value is supplied (caller falls back to the roster timeout)", () => {
+    // 02-05: --timeout now defers to the roster's effective timeout (entry override ?? defaults)
+    // when omitted, so parseTimeout signals "unset" via undefined rather than hardcoding 600000.
+    expect(parseTimeout(undefined)).toBeUndefined();
   });
 
   it("accepts a clean positive integer string", () => {
