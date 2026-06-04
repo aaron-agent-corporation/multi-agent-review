@@ -14,7 +14,7 @@ A vendor-neutral orchestrator that drives heterogeneous frontier-model CLIs (cla
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Workspace + First Adapter** - Drive one CLI headlessly into a deterministic, manifest-indexed artifact workspace (completed 2026-06-04)
-- [ ] **Phase 2: Adapter Layer + Roster + Pre-flight** - Swappable per-vendor adapters, configurable multi-vendor roster, and pre-run readiness checks
+- [x] **Phase 2: Adapter Layer + Roster + Pre-flight** - Swappable per-vendor adapters, configurable multi-vendor roster, and pre-run readiness checks (completed 2026-06-04)
 - [ ] **Phase 3: Protocol Engine + Independence Enforcement** - 6-phase state machine with enforced turn-taking and structural draft independence
 - [ ] **Phase 4: First End-to-End Run** - One complete 3-agent run through all 6 phases producing a decision record (v1 success bar)
 - [ ] **Phase 5: Hardening — Resume, Gating, Majority, Guards** - Resumable runs, configurable human gating, majority-signal tie-breaking, and re-litigation guards
@@ -78,7 +78,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 02-05-PLAN.md — CLI wiring (`init`/`preflight`/roster `invoke`+withRetry) + live human-verify (ORCH-02/03/05)
+- [x] 02-05-PLAN.md — CLI wiring (`init`/`preflight`/roster `invoke`+withRetry) + live human-verify (ORCH-02/03/05)
 
 ### Phase 3: Protocol Engine + Independence Enforcement
 
@@ -135,7 +135,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
-| 2. Adapter Layer + Roster + Pre-flight | 4/5 | In Progress|  |
+| 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
 | 3. Protocol Engine + Independence Enforcement | 0/TBD | Not started | - |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |

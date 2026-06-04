@@ -1,0 +1,20 @@
+{
+  "agents": [
+    {
+      "vendor": "claude",
+      "name": "claude-1"
+    },
+    {
+      "vendor": "codex",
+      "name": "codex-1"
+    },
+    {
+      "vendor": "gemini",
+      "name": "gemini-1"
+    }
+  ],
+  "defaults": {
+    "timeoutMs": 600000,
+    "retries": 2
+  }
+}

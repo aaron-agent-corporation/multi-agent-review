@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-06-04T20:01:18.403Z"
-last_activity: 2026-06-04 -- Phase 02 execution started
+last_updated: "2026-06-04T21:18:24.023Z"
+last_activity: 2026-06-04
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 8
-  completed_plans: 3
-  percent: 20
+  completed_plans: 8
+  percent: 40
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-04)
 
 ## Current Position
 
-Phase: 02 (adapter-layer-roster-pre-flight) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 02
-Last activity: 2026-06-04 -- Phase 02 execution started
+Phase: 02 (adapter-layer-roster-pre-flight) — COMPLETE (all 5 plans)
+Plan: 5 of 5 — 02-05 complete (live human-verify checkpoint approved)
+Status: Phase 02 complete — ready for verification / next phase
+Last activity: 2026-06-04 -- 02-05 executed + live-verified
 
-Progress: [██████████] 100%
+Progress: [████████░░] 40% (8/8 plans across completed phases 1-2)
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [██████████] 100%
 | Phase 1 P01-01 | 12 | 3 tasks | 14 files |
 | Phase 1 P02 | 8 | 2 tasks | 5 files |
 | Phase 1 P03 | 6 | 2 tasks | 3 files |
+| Phase 2 P05 | 54 | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 1: dropped --bare (subscription auth); pinned zod@^4; manifest status keeps timeout distinct from failed.
 - [Phase ?]: Phase 1: claude adapter normalizes via exitCode===0 AND !is_error (never subtype); pino default-import for destination typing.
 - [Phase 1]: Complete — `mar invoke` walking skeleton green end-to-end; live real-claude smoke human-verified (ORCH-01/06, PROT-02/07). CLI branches only on turn.ok; --run charset-validated; promptRef never logs body.
+- [Phase 2]: Plan 02-05 — `mar init` / `mar preflight` / roster-name-resolved `mar invoke` (withRetry + per-attempt logging) live-verified; ORCH-02/03/05 closed. Fixed codex stdin hang via `stdin:'ignore'` across all adapters; invoke is gate-exempt and does not auto-preflight (D-27/D-29).
 
 ### Pending Todos
 
@@ -91,6 +93,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-04T19:23:55.382Z
+Last session: 2026-06-04T21:15:23.338Z
 Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-adapter-layer-roster-pre-flight/02-CONTEXT.md
+Resume file: None
