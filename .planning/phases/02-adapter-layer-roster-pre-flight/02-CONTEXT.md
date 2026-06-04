@@ -37,6 +37,12 @@ Covers requirements: ORCH-02, ORCH-03, ORCH-04, ORCH-05. The protocol state mach
 - **D-30:** Partial pre-flight failure at run start: BLOCK by default showing the failure table; optional `--skip-failed` drops failing agents and proceeds ONLY if ≥2 distinct vendors remain healthy — the diversity invariant is never compromised.
 - **D-31:** Gemini/Antigravity churn risk surfaces via preflight hints only (explain the June 18, 2026 transition, point at paid-tier/API-key options when the gemini probe fails). No special-casing elsewhere — gemini stays a plain swappable adapter.
 
+### Research-resolved decisions (post-discussion)
+- **D-32:** Gemini adapter is FIXTURE-BUILT and preflight-hinted (user confirmed). Gemini auth is currently broken on this machine (exit 41 no-auth-method / exit 1 ProjectIdRequiredError / exit 55 trusted-dir gate — see 02-RESEARCH.md). Build the adapter against fake-gemini.mjs mirroring documented shapes; `mar preflight` showing gemini ✗ with an actionable auth hint is CORRECT behavior, not a bug. ORCH-04 is satisfied by claude+codex. Gemini's error JSON goes to STDERR — adapter parses stdout-or-stderr; do not allowlist gemini exit codes.
+- **D-33:** Probe prompt "Reply with exactly: pong", probe timeout ~30s (codex retries auth 5x internally, inflating failure latency), probe retries: 0.
+- **D-34:** `mar.config.json` is committed to the repo (not gitignored) — roster is project configuration.
+- **D-35:** No new dependencies for retry/backoff/NDJSON-parsing/PATH-detection — plain TS on the existing stack (p-retry evaluated and rejected by research).
+
 ### Claude's Discretion
 - Exact probe prompt content and probe timeout value
 - Codex adapter specifics (stderr/stdout split handling, `--ephemeral`, `--skip-git-repo-check`, sandbox flags) and gemini adapter specifics — follow the STACK.md flag tables and pin behavior in adapter tests like Phase 1 did for claude
