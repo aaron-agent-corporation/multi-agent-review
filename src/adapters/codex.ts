@@ -50,6 +50,12 @@ export function makeCodexAdapter(bin = "codex", model?: string): AgentAdapter {
         forceKillAfterDelay: 5000, // SIGKILL escalation if it won't die
         reject: false, // resolve (don't throw) on non-zero exit → inspect uniformly
         cleanup: true, // kill child if our process exits
+        // CRITICAL (02-05 live fix): close stdin. The prompt is passed as an argv positional, NEVER
+        // via stdin — but `codex exec` BLOCKS on an open stdin pipe (execa's default), hanging every
+        // invocation until the wall-clock timeout. `stdin:"ignore"` (no pipe) makes codex see EOF
+        // and run immediately. Verified live: same argv hangs with an open pipe, completes ~14s with
+        // stdin closed. claude tolerated the open pipe, which is why this only surfaced for codex.
+        stdin: "ignore",
         // No shell (execa passes argv as an array) — prompt cannot inject shell commands (T-02-01).
       });
 

@@ -9,7 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+
+// Cold `npx tsx` startup (~5s) under concurrent load can exceed the default 15s; the fixture
+// itself resolves in ~0.1s. A generous timeout absorbs harness startup, not a hang.
+vi.setConfig({ testTimeout: 60_000 });
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = join(here, "..");

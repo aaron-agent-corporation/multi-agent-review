@@ -8,7 +8,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Each test spawns a COLD `npx tsx` (compile + run ~5s); under concurrent load several share the
+// CPU. A generous per-test timeout absorbs the cold-start cost so the suite is not flaky. The
+// fixtures themselves resolve in ~0.1s — this is harness startup, not a hang.
+vi.setConfig({ testTimeout: 60_000 });
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = join(here, "..");
@@ -60,7 +65,7 @@ function soleRunDir(): string {
   return join(runs, ids[0]);
 }
 
-describe("mar invoke — roster-name resolution (no hardcoded vendor, D-20)", () => {
+describe.sequential("mar invoke — roster-name resolution (no hardcoded vendor, D-20)", () => {
   it("resolves codex-1 to the codex adapter via roster bin and writes a completed artifact", async () => {
     writeRoster([{ name: "codex-1", vendor: "codex", bin: `node ${fakeCodex}` }]);
     const r = await runCli(["invoke", "--agent", "codex-1", "--prompt", "ping"]);
@@ -122,7 +127,7 @@ describe("mar invoke — roster-name resolution (no hardcoded vendor, D-20)", ()
   });
 });
 
-describe("mar invoke — withRetry wraps the adapter; every attempt logged (D-24/D-25)", () => {
+describe.sequential("mar invoke — withRetry wraps the adapter; every attempt logged (D-24/D-25)", () => {
   it("a transient-then-ok codex invoke is RETRIED and logs attempt 1 AND attempt 2", async () => {
     writeRoster(
       [{ name: "codex-1", vendor: "codex", bin: `node ${fakeCodex}` }],
@@ -150,7 +155,7 @@ describe("mar invoke — withRetry wraps the adapter; every attempt logged (D-24
   });
 });
 
-describe("mar init — writes a starter roster from PATH detection (D-21)", () => {
+describe.sequential("mar init — writes a starter roster from PATH detection (D-21)", () => {
   it("writes a mar.config.json that re-parses through MarConfig", async () => {
     // Inject a stub bin dir for claude+codex, PREPENDED to the real PATH (tsx/node still resolve).
     // Detection is a superset {claude, codex, ...possibly real gemini}; assert the stubs are
@@ -181,7 +186,7 @@ describe("mar init — writes a starter roster from PATH detection (D-21)", () =
   });
 });
 
-describe("mar preflight — status table + exit code (D-28)", () => {
+describe.sequential("mar preflight — status table + exit code (D-28)", () => {
   it("all-pass roster prints status lines and exits 0; writes the cache", async () => {
     writeRoster([{ name: "claude-1", vendor: "claude", bin: `node ${fakeClaude}` }]);
     const r = await runCli(["preflight"]);

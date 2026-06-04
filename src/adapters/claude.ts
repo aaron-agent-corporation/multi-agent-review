@@ -49,6 +49,10 @@ export function makeClaudeAdapter(bin = "claude", model?: string): AgentAdapter 
         forceKillAfterDelay: 5000, // SIGKILL escalation if it won't die
         reject: false, // resolve (don't throw) on non-zero exit → inspect uniformly
         cleanup: true, // kill child if our process exits
+        // Close stdin (02-05 live fix, uniform across adapters): the prompt is passed as an argv
+        // value, never via stdin. claude already tolerated execa's default open pipe, but closing
+        // it removes any chance of a stdin-block and keeps all three adapters identical.
+        stdin: "ignore",
         // No shell (execa passes argv as an array) — prompt cannot inject shell commands (T-01-05).
       });
 
