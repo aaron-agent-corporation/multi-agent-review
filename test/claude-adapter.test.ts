@@ -1,13 +1,33 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { TurnRequest } from "../src/adapters/adapter.js";
-import { makeClaudeAdapter } from "../src/adapters/claude.js";
+import { makeClaudeAdapter, splitBin } from "../src/adapters/claude.js";
 
 // Absolute path to the executable fake-claude fixture (node shebang, chmod +x).
 // Spawning the fixture directly as `bin` means the adapter's argv (`-p <prompt> --output-format json`)
 // is passed straight to it; the fixture selects its mode from argv via `args.includes(...)`,
 // so a prompt of "--fail-auth"/"--bad-json"/"--hang" drives the corresponding failure mode.
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
+
+describe("splitBin (WR-01: single split keeps spaced paths intact)", () => {
+  it("returns the bare bin with no preArgs for a plain executable name", () => {
+    expect(splitBin("claude")).toEqual({ cmd: "claude", preArgs: [] });
+  });
+
+  it("splits a launcher form on the FIRST whitespace only", () => {
+    // The remainder (a script path) stays a SINGLE arg even when it contains spaces.
+    expect(splitBin("node /home/Active Projects/fake-claude.mjs")).toEqual({
+      cmd: "node",
+      preArgs: ["/home/Active Projects/fake-claude.mjs"],
+    });
+  });
+
+  it("treats a whole existing spaced path as the executable, never splitting it", () => {
+    // The fixture path itself contains no spaces, but it IS an existing file, so it must be
+    // returned verbatim as the executable with no preArgs.
+    expect(splitBin(FIXTURE)).toEqual({ cmd: FIXTURE, preArgs: [] });
+  });
+});
 
 function req(promptText: string, timeoutMs = 5000): TurnRequest {
   return { agent: "claude", promptText, runDir: "runs/test", seq: 1, timeoutMs };

@@ -3,7 +3,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { execa } from "execa";
-import { makeClaudeAdapter } from "./adapters/claude.js";
+import { makeClaudeAdapter, splitBin } from "./adapters/claude.js";
 import { logInvocation } from "./log/invocation.js";
 import { writeArtifact } from "./workspace/artifacts.js";
 import { newRunId, runDir as runDirFor } from "./workspace/layout.js";
@@ -38,8 +38,10 @@ function resolvePrompt(value: string): { promptText: string; promptRef: string }
 /** Best-effort `claude --version` detection; "unknown" if the binary is absent/errors. */
 async function detectClaudeVersion(bin: string): Promise<string> {
   try {
-    const cmd = bin.trim().split(/\s+/);
-    const r = await execa(cmd[0], [...cmd.slice(1), "--version"], {
+    // Reuse the adapter's single-split strategy (WR-01): splitting on every whitespace run
+    // would break an injected bin whose path contains spaces (e.g. "Active Projects/…").
+    const { cmd, preArgs } = splitBin(bin);
+    const r = await execa(cmd, [...preArgs, "--version"], {
       reject: false,
       timeout: 10_000,
     });

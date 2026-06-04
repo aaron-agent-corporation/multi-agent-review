@@ -24,7 +24,7 @@ function buildArgv(promptText: string): string[] {
  * once keeps paths that contain spaces (e.g. "Active Projects/…") intact. The production default
  * `"claude"` has no whitespace → `{ cmd:"claude", preArgs:[] }`.
  */
-function splitBin(bin: string): { cmd: string; preArgs: string[] } {
+export function splitBin(bin: string): { cmd: string; preArgs: string[] } {
   const trimmed = bin.trim();
   // If the WHOLE value is itself an existing executable file (e.g. a fixture path that may
   // contain spaces), use it directly — never split it. This disambiguates a spaced path from a
