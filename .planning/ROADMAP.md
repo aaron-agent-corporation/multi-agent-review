@@ -40,7 +40,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Scaffold + schemas + filesystem-as-truth workspace (layout/manifest/artifacts) + fake-CLI fixture + RED e2e anchor
+- [x] 01-01-PLAN.md — Scaffold + schemas + filesystem-as-truth workspace (layout/manifest/artifacts) + fake-CLI fixture + RED e2e anchor
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -119,7 +119,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace + First Adapter | 0/3 | Not started | - |
+| 1. Workspace + First Adapter | 1/3 | In Progress|  |
 | 2. Adapter Layer + Roster + Pre-flight | 0/TBD | Not started | - |
 | 3. Protocol Engine + Independence Enforcement | 0/TBD | Not started | - |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
