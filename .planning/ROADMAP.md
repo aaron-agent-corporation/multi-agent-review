@@ -31,7 +31,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Every run has an ID, a status, and a manifest that indexes its artifacts and phase completion
   4. Every invocation is logged with command, prompt reference, exit code, duration, and output location
   5. A hung invocation is bounded by an external wall-clock timeout rather than blocking indefinitely
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Scaffold + schemas + filesystem-as-truth workspace (layout/manifest/artifacts) + fake-CLI fixture + RED e2e anchor
+- [ ] 01-02-PLAN.md — claude adapter (execa, no --bare, normalized TurnResult, timeout) + pino NDJSON invocation log
+- [ ] 01-03-PLAN.md — `mar invoke` CLI wiring end-to-end (turns e2e GREEN) + live human-verified smoke
 
 ### Phase 2: Adapter Layer + Roster + Pre-flight
 **Goal**: A user can configure a roster of distinct-vendor agents and the system reliably drives each through a uniform adapter contract, refusing to start unsafe rosters and surfacing CLI problems before a run begins.
@@ -90,7 +95,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace + First Adapter | 0/TBD | Not started | - |
+| 1. Workspace + First Adapter | 0/3 | Not started | - |
 | 2. Adapter Layer + Roster + Pre-flight | 0/TBD | Not started | - |
 | 3. Protocol Engine + Independence Enforcement | 0/TBD | Not started | - |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
