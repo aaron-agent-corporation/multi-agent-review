@@ -87,7 +87,8 @@ describe("artifacts (atomic write + done-detection)", () => {
     });
     const md = readFileSync(path, "utf8");
     expect(md).toContain("---"); // frontmatter fence
-    expect(md).toContain("agent: claude");
+    // Scalars are JSON-quoted now (CR-01: injection-safe YAML), so values are double-quoted.
+    expect(md).toContain('agent: "claude"');
     expect(md).toContain("pong");
     const raw = JSON.parse(readFileSync(rawPath, "utf8"));
     expect(raw.result).toBe("pong");

@@ -15,9 +15,28 @@ export interface WriteArtifactOptions {
   kind?: string;
 }
 
-/** Serialize a flat object to a minimal YAML frontmatter block. */
+/**
+ * Serialize a single scalar to a YAML-safe representation. Vendor-controlled values
+ * (e.g. `sessionId`, which `cli.ts` copies verbatim from the claude CLI JSON) may contain
+ * newlines, a leading `---`, or `: ` sequences that would break the frontmatter delimiters or
+ * inject arbitrary keys (CR-01). Numbers are emitted bare; strings are flattened (CR/LF →
+ * spaces, remaining C0 control chars + DEL stripped) and JSON-stringified, which yields a
+ * quoted, escaped double-quoted scalar that is valid YAML.
+ */
+// C0 control characters (U+0000-U+001F) plus DEL (U+007F). Built from a string literal so no
+// raw control byte is embedded in this source file.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately stripping control chars.
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
+
+function yamlScalar(v: string | number): string {
+  if (typeof v === "number") return String(v);
+  const flattened = v.replace(/\r?\n/g, " ").replace(CONTROL_CHARS, "");
+  return JSON.stringify(flattened);
+}
+
+/** Serialize a flat object to a minimal, injection-safe YAML frontmatter block (CR-01). */
 function toFrontmatter(fields: Record<string, string | number>): string {
-  const lines = Object.entries(fields).map(([k, v]) => `${k}: ${v}`);
+  const lines = Object.entries(fields).map(([k, v]) => `${k}: ${yamlScalar(v)}`);
   return `---\n${lines.join("\n")}\n---\n`;
 }
 
