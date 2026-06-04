@@ -24,7 +24,9 @@ findings:
   warning: 5
   info: 4
   total: 10
-status: issues_found
+  fixed: 6
+  remaining: 4
+status: fixed
 ---
 
 # Phase 1: Code Review Report
@@ -32,7 +34,7 @@ status: issues_found
 **Reviewed:** 2026-06-04T00:00:00Z
 **Depth:** standard
 **Files Reviewed:** 15
-**Status:** issues_found
+**Status:** fixed (CR-01 + WR-01..WR-05 resolved; 4 Info findings remain out of scope)
 
 ## Summary
 
@@ -54,6 +56,7 @@ regressions — those invariants hold.
 
 ### CR-01: Unescaped vendor data injected into YAML frontmatter corrupts the artifact
 
+**Resolved:** 9d33f73
 **File:** `src/workspace/artifacts.ts:18-22`
 **Issue:** `toFrontmatter` interpolates every value directly into the YAML block with no
 escaping: `` `${k}: ${v}` ``. Several values are vendor-controlled — most notably
@@ -84,6 +87,7 @@ function toFrontmatter(fields: Record<string, string | number>): string {
 
 ### WR-01: `detectClaudeVersion` splits on all whitespace, breaking paths with spaces
 
+**Resolved:** 2f18677
 **File:** `src/cli.ts:41-42`
 **Issue:** `bin.trim().split(/\s+/)` splits the injected `MAR_CLAUDE_BIN` on *every* run of
 whitespace, then spawns `cmd[0]` with `cmd.slice(1)` as args. This contradicts
@@ -105,6 +109,7 @@ const r = await execa(cmd, [...preArgs, "--version"], { reject: false, timeout: 
 
 ### WR-02: `--timeout` silently accepts trailing garbage and sub-millisecond values
 
+**Resolved:** 311ce9e
 **File:** `src/cli.ts:63-67`
 **Issue:** `Number.parseInt(opts.timeout, 10)` stops at the first non-digit and returns the
 prefix, so `--timeout 500abc` becomes `500` and `--timeout 1e3` becomes `1` (a 1 ms
@@ -123,6 +128,7 @@ if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
 
 ### WR-03: Resumed-run seq can collide and overwrite a prior successful artifact
 
+**Resolved:** c715b2f
 **File:** `src/cli.ts:88`
 **Issue:** On `--run`, `seq = manifest.artifacts.length + 1`. Because only *successful*
 turns call `addArtifact`, the artifact count does not advance on failed/timed-out turns —
@@ -138,6 +144,7 @@ invocations), and refuse to overwrite an existing artifact path.
 
 ### WR-04: Audit log records a reconstructed argv, not the argv actually spawned
 
+**Resolved:** c8db957
 **File:** `src/cli.ts:112,147-154` (vs `src/adapters/claude.ts:14-16,63`)
 **Issue:** The adapter spawns `["-p", promptText, "--output-format", "json"]`, but the
 invocation log records `command = ["-p", promptRef, "--output-format", "json"]` —
@@ -152,6 +159,7 @@ source of truth instead of two independently-maintained literals.
 
 ### WR-05: `resolvePrompt` reads arbitrary filesystem paths as prompt content
 
+**Resolved:** 7a7f495
 **File:** `src/cli.ts:30-36`
 **Issue:** Any `--prompt` value that happens to name an existing file is read with
 `readFileSync(value, "utf8")` and sent to the model, with no size cap and no path
