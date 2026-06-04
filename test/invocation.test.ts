@@ -22,6 +22,7 @@ function rec(overrides: Partial<InvocationRecord> = {}): InvocationRecord {
     durationMs: 2588,
     timedOut: false,
     artifactPath: "runs/x/001-claude-output.md",
+    attempt: 1,
     ...overrides,
   };
 }
@@ -76,5 +77,22 @@ describe("logInvocation", () => {
   it("writes to a file named invocations.ndjson", () => {
     logInvocation(runDir, rec());
     expect(() => readFileSync(join(runDir, "invocations.ndjson"), "utf8")).not.toThrow();
+  });
+
+  it("round-trips the attempt field (D-25): a record with attempt:2 carries attempt:2", () => {
+    logInvocation(runDir, rec({ attempt: 2 }));
+    const parsed = JSON.parse(readLines()[0]);
+    expect(parsed.attempt).toBe(2);
+    // The original six audit fields remain present and unchanged.
+    for (const field of [
+      "command",
+      "promptRef",
+      "exitCode",
+      "durationMs",
+      "timedOut",
+      "artifactPath",
+    ]) {
+      expect(parsed).toHaveProperty(field);
+    }
   });
 });
