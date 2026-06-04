@@ -26,7 +26,7 @@ Covers requirements: ORCH-01 (claude only), ORCH-06, PROT-02, PROT-07. Multi-ven
 - **D-06:** Single CLI entry point named `mar` (multi-agent-review), built with commander. Phase 1 ships one subcommand: `mar invoke --agent claude --prompt <file-or-string> [--run <id>]` (exact flag names at planner's discretion).
 - **D-07:** If no `--run` is given, a new run is created; if given, the invocation appends to the existing run. Creating a run and invoking into it are not separate required steps in Phase 1.
 - **D-08:** Console output is human-readable progress (agent, elapsed time, exit status, artifact path); the structured record goes to the log file and manifest, not stdout.
-- **D-09:** Use `claude -p` with `--output-format json` and `--bare` (per the STACK.md flag table) so user-level `~/.claude` config can't perturb runs.
+- **D-09 (amended per Phase 1 research):** Use `claude -p` with `--output-format json` — WITHOUT `--bare`. Live testing (RESEARCH.md, claude 2.1.162) showed `--bare` only reads `ANTHROPIC_API_KEY`/apiKeyHelper and breaks subscription (OAuth/keychain) auth, which is what the user runs on. Config-isolation can be revisited in Phase 2 (e.g., `--settings`). Adapter must treat a turn as failed when `exitCode !== 0` OR `is_error === true` — exit code alone is unreliable.
 
 ### Artifact format & naming (Claude's discretion — recommended defaults below)
 - **D-10:** Normalized artifact = markdown file containing the agent's text output, with a small YAML frontmatter header (agent, vendor, timestamp, run id, turn id, source invocation log reference). Raw CLI JSON response is preserved alongside as a sibling `.raw.json` file — never discard the raw output.
