@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { Manifest } from "../src/schema/manifest.js";
 import { TurnResult } from "../src/schema/turn.js";
-import { artifactName, artifactPath, newRunId, rawPath, runDir } from "../src/workspace/layout.js";
+import {
+  artifactName,
+  artifactPath,
+  newRunId,
+  nextSeq,
+  rawPath,
+  runDir,
+  seqFromArtifactName,
+} from "../src/workspace/layout.js";
 
 describe("layout naming", () => {
   it("artifactName zero-pads seq to 3 and defaults kind to output", () => {
@@ -30,6 +38,40 @@ describe("layout naming", () => {
 
   it("rawPath replaces .md with .raw.json", () => {
     expect(rawPath("runs/r1", 1, "claude")).toBe("runs/r1/001-claude-output.raw.json");
+  });
+});
+
+describe("seq derivation (WR-03: monotonic over all turns)", () => {
+  it("seqFromArtifactName parses the leading zero-padded seq", () => {
+    expect(seqFromArtifactName("001-claude-output.md")).toBe(1);
+    expect(seqFromArtifactName("012-claude-draft.md")).toBe(12);
+  });
+
+  it("seqFromArtifactName returns null for non-artifact names", () => {
+    expect(seqFromArtifactName("manifest.json")).toBeNull();
+    expect(seqFromArtifactName("001-claude-output.raw.json")).toBeNull();
+    expect(seqFromArtifactName("invocations.ndjson")).toBeNull();
+  });
+
+  it("nextSeq is 1 for an empty run", () => {
+    expect(nextSeq([], [])).toBe(1);
+  });
+
+  it("nextSeq advances past the max manifest seq even when artifact count is lower", () => {
+    // Only one successful artifact recorded (seq 3), but it implies turns 1-2 happened/failed.
+    // Deriving from length (1) would reuse seq 2; deriving from max seq (3) yields 4.
+    expect(nextSeq(["003-claude-output.md"], [])).toBe(4);
+  });
+
+  it("nextSeq accounts for on-disk files not yet in the manifest (failed/partial turns)", () => {
+    // Manifest only knows seq 1, but seq 2's file exists on disk → next must be 3, not 2.
+    expect(
+      nextSeq(["001-claude-output.md"], ["001-claude-output.md", "002-claude-output.md"]),
+    ).toBe(3);
+  });
+
+  it("nextSeq tolerates relative paths in the manifest by taking the basename", () => {
+    expect(nextSeq(["runs/r1/005-claude-output.md"], [])).toBe(6);
   });
 });
 

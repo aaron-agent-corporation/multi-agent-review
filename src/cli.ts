@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { execa } from "execa";
 import { makeClaudeAdapter, splitBin } from "./adapters/claude.js";
 import { logInvocation } from "./log/invocation.js";
 import { writeArtifact } from "./workspace/artifacts.js";
-import { newRunId, runDir as runDirFor } from "./workspace/layout.js";
+import { artifactPath, newRunId, nextSeq, runDir as runDirFor } from "./workspace/layout.js";
 import { addArtifact, createRun, readManifest, setStatus } from "./workspace/manifest.js";
 
 const DEFAULT_TIMEOUT_MS = 600_000; // 10 min (D-17)
@@ -102,7 +102,22 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
       return 2;
     }
     const manifest = await readManifest(runDir); // re-derive state from disk (PROT-07)
-    seq = manifest.artifacts.length + 1;
+    // WR-03: derive a MONOTONIC seq from the highest seq ever used — across both the manifest's
+    // recorded artifacts AND any artifact files on disk — not the success count. Deriving from
+    // `artifacts.length` would reuse a seq after a failed turn and silently overwrite a prior
+    // artifact on a resumed run.
+    const onDiskNames = existsSync(runDir) ? readdirSync(runDir) : [];
+    seq = nextSeq(
+      manifest.artifacts.map((a) => a.path),
+      onDiskNames,
+    );
+    // WR-03: refuse to overwrite an existing artifact at the computed slot. nextSeq is monotonic
+    // so this should never trigger, but the guard makes overwrite impossible rather than relying
+    // on the atomic write to silently clobber.
+    if (existsSync(artifactPath(runDir, seq, "claude"))) {
+      process.stderr.write(`error: artifact slot ${seq} already exists in run "${runId}"\n`);
+      return 2;
+    }
   } else {
     runId = newRunId();
     runDir = runDirFor(runId);
@@ -127,7 +142,7 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
   });
 
   const argv = ["-p", promptRef, "--output-format", "json"];
-  let artifactPath: string | undefined;
+  let artifactRel: string | undefined;
   let exitCode: number;
 
   // 5. Persist outcome — branch ONLY on turn.ok (T-01-13: CLI never re-derives success).
@@ -150,7 +165,7 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
       createdAt: new Date().toISOString(),
     });
     await setStatus(runDir, "completed");
-    artifactPath = relPath;
+    artifactRel = relPath;
     exitCode = 0;
   } else if (turn.timedOut) {
     await setStatus(runDir, "timeout"); // no normalized artifact on timeout (D-17)
@@ -167,15 +182,13 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     exitCode: turn.exitCode,
     durationMs: turn.durationMs,
     timedOut: turn.timedOut,
-    artifactPath,
+    artifactPath: artifactRel,
   });
 
   // 7. Console: ONE human-readable progress line — never the raw JSON (D-08 / T-01-11).
   const secs = (turn.durationMs / 1000).toFixed(1);
   if (turn.ok) {
-    process.stdout.write(
-      `claude ✓  ${secs}s  exit ${turn.exitCode}  → ${runDir}/${artifactPath}\n`,
-    );
+    process.stdout.write(`claude ✓  ${secs}s  exit ${turn.exitCode}  → ${runDir}/${artifactRel}\n`);
   } else {
     const reason = turn.timedOut ? "timeout" : (turn.error ?? "failed");
     process.stdout.write(`claude ✗  ${secs}s  exit ${turn.exitCode}  (${reason})\n`);

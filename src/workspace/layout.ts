@@ -46,3 +46,34 @@ export function artifactPath(
 export function rawPath(runDirPath: string, seq: number, agent: string, kind = "output"): string {
   return artifactPath(runDirPath, seq, agent, kind).replace(/\.md$/, ".raw.json");
 }
+
+/**
+ * Extract the leading zero-padded seq from an artifact filename (`<seq>-<agent>-<kind>.md`),
+ * or `null` when the name does not match the deterministic pattern. Used to derive the next
+ * monotonic seq from files already on disk (WR-03).
+ */
+export function seqFromArtifactName(name: string): number | null {
+  const m = /^(\d+)-.+\.md$/.exec(name);
+  if (!m) return null;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isInteger(n) ? n : null;
+}
+
+/**
+ * Compute the next monotonic turn seq for a run (WR-03). Seq must advance over ALL turns, not
+ * just the successful ones recorded in the manifest, so a resumed run can never reuse a seq and
+ * overwrite a prior artifact. Takes the max seq seen across the manifest's recorded artifact
+ * paths AND any artifact files present on disk, then returns that max + 1 (1 for an empty run).
+ */
+export function nextSeq(manifestArtifactPaths: string[], onDiskNames: string[]): number {
+  let max = 0;
+  for (const p of manifestArtifactPaths) {
+    const s = seqFromArtifactName(p.split("/").pop() ?? p);
+    if (s !== null && s > max) max = s;
+  }
+  for (const name of onDiskNames) {
+    const s = seqFromArtifactName(name);
+    if (s !== null && s > max) max = s;
+  }
+  return max + 1;
+}
