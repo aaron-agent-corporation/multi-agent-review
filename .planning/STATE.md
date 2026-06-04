@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-06-04T16:08:45.372Z"
+last_updated: "2026-06-04T16:14:33.188Z"
 last_activity: 2026-06-04
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-04)
 ## Current Position
 
 Phase: 1 (Workspace + First Adapter) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-06-04
 
-Progress: [███░░░░░░░] 33%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [███░░░░░░░] 33%
 
 *Updated after each plan completion*
 | Phase 1 P01-01 | 12 | 3 tasks | 14 files |
+| Phase 1 P02 | 8 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,7 @@ Recent decisions affecting current work:
 - Independence enforced structurally (workspace-scoping), not by prompt — highest-stakes design choice.
 - No debate loop in v1; tiered evidence-grounded integrator judgment + human escalation.
 - [Phase ?]: Phase 1: dropped --bare (subscription auth); pinned zod@^4; manifest status keeps timeout distinct from failed.
+- [Phase ?]: Phase 1: claude adapter normalizes via exitCode===0 AND !is_error (never subtype); pino default-import for destination typing.
 
 ### Pending Todos
 
@@ -87,6 +89,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-04T16:08:35.601Z
+Last session: 2026-06-04T16:14:16.047Z
 Stopped at: Completed 01-01-PLAN.md
 Resume file: None

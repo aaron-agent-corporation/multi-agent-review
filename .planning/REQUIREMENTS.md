@@ -9,12 +9,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Orchestration (CLI driving)
 
-- [ ] **ORCH-01**: User can run any installed vendor CLI (claude, codex, gemini) headlessly through a common adapter interface that returns structured output
+- [x] **ORCH-01**: User can run any installed vendor CLI (claude, codex, gemini) headlessly through a common adapter interface that returns structured output
 - [ ] **ORCH-02**: Every CLI invocation is wrapped with a configurable timeout and bounded retry, so a hung agent never blocks a run indefinitely
 - [ ] **ORCH-03**: User can define an agent roster in config (name, vendor, CLI command template, model); adding a vendor requires no protocol-layer code changes
 - [ ] **ORCH-04**: System refuses to start a run with fewer than 2 distinct vendors in the roster
 - [ ] **ORCH-05**: System pre-flight checks each roster CLI (installed, authenticated, responsive) before starting a run
-- [ ] **ORCH-06**: Every invocation is logged with command, prompt reference, exit code, duration, and output location
+- [x] **ORCH-06**: Every invocation is logged with command, prompt reference, exit code, duration, and output location
 
 ### Protocol (phases & workspace)
 
@@ -86,8 +86,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ORCH-01 | Phase 1 | Pending |
-| ORCH-06 | Phase 1 | Pending |
+| ORCH-01 | Phase 1 | Complete |
+| ORCH-06 | Phase 1 | Complete |
 | PROT-02 | Phase 1 | Complete |
 | PROT-07 | Phase 1 | Complete |
 | ORCH-02 | Phase 2 | Pending |

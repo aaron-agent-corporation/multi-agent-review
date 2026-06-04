@@ -44,7 +44,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — claude adapter (execa, no --bare, normalized TurnResult, timeout) + pino NDJSON invocation log
+- [x] 01-02-PLAN.md — claude adapter (execa, no --bare, normalized TurnResult, timeout) + pino NDJSON invocation log
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -119,7 +119,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace + First Adapter | 1/3 | In Progress|  |
+| 1. Workspace + First Adapter | 2/3 | In Progress|  |
 | 2. Adapter Layer + Roster + Pre-flight | 0/TBD | Not started | - |
 | 3. Protocol Engine + Independence Enforcement | 0/TBD | Not started | - |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
