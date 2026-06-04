@@ -12,7 +12,10 @@ Differently-trained frontier models catch each other's blind spots — the syste
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Run one vendor CLI (claude) headlessly through a common adapter returning structured, normalized output — Validated in Phase 1: Workspace + First Adapter (ORCH-01 claude-only slice)
+- [x] Deterministically named artifacts in manifest-indexed `runs/<id>/` workspace; artifact trail authoritative (PROT-02, PROT-07) — Validated in Phase 1
+- [x] Every invocation logged with command, prompt reference, exit code, duration, output location (ORCH-06) — Validated in Phase 1
+- [x] Hung invocations bounded by external wall-clock timeout — Validated in Phase 1
 
 ### Active
 
@@ -81,4 +84,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-04 after initialization*
+*Last updated: 2026-06-04 after Phase 1 completion (Workspace + First Adapter — mar invoke slice live-verified against claude 2.1.162)*
