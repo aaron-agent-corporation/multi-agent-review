@@ -1,7 +1,13 @@
-import { existsSync } from "node:fs";
 import { execa } from "execa";
 import { ClaudeJson, type TurnResult } from "../schema/turn.js";
 import type { AgentAdapter, TurnRequest } from "./adapter.js";
+// Vendor-agnostic adapter helpers now live in common.ts so codex/gemini import rather than
+// copy-paste them (Phase 2). splitBin is re-exported below for back-compat — existing callers
+// (and claude-adapter.test.ts) import it from this module.
+import { redactArgv, safeJsonParse, splitBin } from "./common.js";
+
+// Re-export splitBin so existing imports of `../adapters/claude.js` keep working unchanged.
+export { splitBin };
 
 /**
  * Build the exact, pinned claude argv for headless JSON invocation.
@@ -11,49 +17,10 @@ import type { AgentAdapter, TurnRequest } from "./adapter.js";
  * subscription (OAuth/keychain) auth. The flag-pinning test asserts this exact array so a
  * future edit that drifts the flags fails loudly.
  */
-function buildArgv(promptText: string): string[] {
-  return ["-p", promptText, "--output-format", "json"];
-}
-
-/**
- * The placeholder substituted for the prompt body in the redacted command (WR-04 / D-15). The
- * audit log records the real argv with ONLY this slot swapped, so the log never carries the
- * prompt body yet always reflects the actual flag set.
- */
-const PROMPT_PLACEHOLDER = "<prompt>";
-
-/** Build the redacted argv (real flags, prompt body replaced) from the spawned argv. */
-function redactArgv(argv: string[], promptText: string): string[] {
-  return argv.map((a) => (a === promptText ? PROMPT_PLACEHOLDER : a));
-}
-
-/**
- * Split an injectable `bin` into an executable + leading args. The production default is the
- * bare `"claude"` (→ `["claude", []]`), but the e2e harness injects a launcher like
- * `node /path/fake-claude.mjs` via MAR_CLAUDE_BIN. execa takes a single executable plus an argv
- * array (no shell — T-01-05), so we split on the FIRST whitespace only: the leading token is the
- * executable and the remainder is treated as a SINGLE argument (the script path). Splitting only
- * once keeps paths that contain spaces (e.g. "Active Projects/…") intact. The production default
- * `"claude"` has no whitespace → `{ cmd:"claude", preArgs:[] }`.
- */
-export function splitBin(bin: string): { cmd: string; preArgs: string[] } {
-  const trimmed = bin.trim();
-  // If the WHOLE value is itself an existing executable file (e.g. a fixture path that may
-  // contain spaces), use it directly — never split it. This disambiguates a spaced path from a
-  // `node <script>` launcher form.
-  if (existsSync(trimmed)) return { cmd: trimmed, preArgs: [] };
-  const i = trimmed.search(/\s/);
-  if (i === -1) return { cmd: trimmed, preArgs: [] };
-  return { cmd: trimmed.slice(0, i), preArgs: [trimmed.slice(i + 1).trim()] };
-}
-
-/** Parse JSON without throwing — returns `undefined` on any parse error. */
-function safeJsonParse(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
+function buildArgv(promptText: string, model?: string): string[] {
+  const a = ["-p", promptText, "--output-format", "json"];
+  if (model) a.push("--model", model); // claude model flag (PINNED model-param contract)
+  return a;
 }
 
 /**
@@ -67,12 +34,12 @@ function safeJsonParse(text: string): unknown {
  * Unparseable stdout becomes a graceful `ok:false` TurnResult, never a crash (T-01-06).
  * A hung process is bounded by execa's wall-clock `timeout` + `forceKillAfterDelay` (T-01-07).
  */
-export function makeClaudeAdapter(bin = "claude"): AgentAdapter {
+export function makeClaudeAdapter(bin = "claude", model?: string): AgentAdapter {
   return {
     name: "claude",
     async invoke(req: TurnRequest): Promise<TurnResult> {
       const { cmd, preArgs } = splitBin(bin);
-      const argv = [...preArgs, ...buildArgv(req.promptText)];
+      const argv = [...preArgs, ...buildArgv(req.promptText, model)];
       // WR-04: the redacted argv (prompt body → placeholder) is the SAME array we spawn, so the
       // audit log and the spawn share one source of truth and can never silently diverge.
       const redactedCommand = redactArgv(argv, req.promptText);
