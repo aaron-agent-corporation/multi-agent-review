@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Manifest } from "../src/schema/manifest.js";
 import { TurnResult } from "../src/schema/turn.js";
-import {
-  artifactName,
-  artifactPath,
-  newRunId,
-  rawPath,
-  runDir,
-} from "../src/workspace/layout.js";
+import { artifactName, artifactPath, newRunId, rawPath, runDir } from "../src/workspace/layout.js";
 
 describe("layout naming", () => {
   it("artifactName zero-pads seq to 3 and defaults kind to output", () => {

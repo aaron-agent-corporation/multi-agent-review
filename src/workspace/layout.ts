@@ -2,7 +2,10 @@ import { join } from "node:path";
 import { customAlphabet } from "nanoid";
 
 // URL/path-safe alphabet — no "/" or ".." can ever appear in a run id (T-01-01 mitigation).
-const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_", 6);
+const nanoid = customAlphabet(
+  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_",
+  6,
+);
 
 /**
  * Sortable, collision-safe run id: `YYYYMMDD` timestamp prefix + `-` + nanoid(6) (D-13).
@@ -30,7 +33,12 @@ export function artifactName(seq: number, agent: string, kind = "output"): strin
 }
 
 /** Full path to the normalized markdown artifact within a run dir. */
-export function artifactPath(runDirPath: string, seq: number, agent: string, kind = "output"): string {
+export function artifactPath(
+  runDirPath: string,
+  seq: number,
+  agent: string,
+  kind = "output",
+): string {
   return join(runDirPath, artifactName(seq, agent, kind));
 }
 

@@ -7,12 +7,11 @@
 // Plan 03 turns it green by wiring the CLI to the workspace + adapter built in
 // Plans 01 and 02.
 
-import { execa } from "execa";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execa } from "execa";
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -34,15 +33,7 @@ it("mar invoke produces a normalized artifact, manifest, and invocation log on d
   // Drive the CLI end-to-end through tsx, pointing the adapter at the fake fixture.
   const result = await execa(
     "npx",
-    [
-      "tsx",
-      cliEntry,
-      "invoke",
-      "--agent",
-      "claude",
-      "--prompt",
-      "ping",
-    ],
+    ["tsx", cliEntry, "invoke", "--agent", "claude", "--prompt", "ping"],
     {
       cwd: workdir,
       reject: false,
