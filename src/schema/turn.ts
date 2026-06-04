@@ -21,6 +21,52 @@ export const ClaudeJson = z
 export type ClaudeJson = z.infer<typeof ClaudeJson>;
 
 /**
+ * One `codex exec --json` NDJSON event (codex-cli 0.128.0, verified live in RESEARCH.md). Codex
+ * emits one JSON object per stdout line; the adapter parses each line and keys success off the
+ * terminal `turn.completed`/`turn.failed` event. Only the consumed fields are declared;
+ * `.passthrough()` tolerates new event types / vendor key drift (Pitfall 1/7). Codex-specific —
+ * MUST NOT leak past the adapter boundary (D-12).
+ */
+export const CodexEvent = z
+  .object({
+    type: z.string(),
+    item: z
+      .object({ type: z.string(), text: z.string().optional() })
+      .partial()
+      .optional(),
+    error: z.object({ message: z.string() }).partial().optional(),
+    message: z.string().optional(),
+    usage: z.unknown().optional(),
+  })
+  .passthrough();
+
+export type CodexEvent = z.infer<typeof CodexEvent>;
+
+/**
+ * Raw `gemini -p --output-format json` shape (gemini 0.45.0; success shape per docs, failure
+ * shapes verified live in RESEARCH.md). `error` is present ONLY on failure and — on the
+ * auth-failure path — the whole object routes to STDERR (the adapter parses stdout-OR-stderr,
+ * Pitfall 3). Only consumed fields declared; `.passthrough()` tolerates drift. Gemini-specific —
+ * MUST NOT leak past the adapter boundary (D-12).
+ */
+export const GeminiJson = z
+  .object({
+    response: z.string().optional(), // present on success
+    stats: z.unknown().optional(),
+    session_id: z.string().optional(),
+    error: z
+      .object({
+        type: z.string().optional(),
+        message: z.string(),
+        code: z.number().optional(),
+      })
+      .optional(), // present only on failure
+  })
+  .passthrough();
+
+export type GeminiJson = z.infer<typeof GeminiJson>;
+
+/**
  * Vendor-agnostic normalized result the protocol layer sees (D-12). No claude-specific
  * field names — camelCase metadata only. `text` is "" on failure.
  */
