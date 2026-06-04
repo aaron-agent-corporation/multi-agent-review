@@ -29,9 +29,9 @@ const Agent = z.discriminatedUnion("vendor", [
  * timeout/retry budget (retries default 2 per D-23 — the discussion settled on 2 even though the
  * CONTEXT example shows 1).
  *
- * NOTE: the >=2-vendor rule is a run-start GATE (gates.ts / ORCH-04 / D-29), NOT a config-load
- * error — a single-vendor config is legitimate for `mar invoke` (D-29 exemption). Do NOT enforce
- * a vendor count here.
+ * NOTE: the two-vendor-minimum rule is a run-start GATE (gates.ts / ORCH-04 / D-29), NOT a
+ * config-load error — a single-vendor config is legitimate for `mar invoke` (D-29 exemption).
+ * Do NOT enforce a vendor count here.
  *
  * `defaults` uses `.prefault({})` (NOT `.default({})`): zod v4's `.default()` returns the literal
  * value without re-parsing, so nested field defaults (timeoutMs/retries) would NOT fire. `prefault`
