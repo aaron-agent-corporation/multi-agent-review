@@ -13,7 +13,7 @@ A vendor-neutral orchestrator that drives heterogeneous frontier-model CLIs (cla
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Workspace + First Adapter** - Drive one CLI headlessly into a deterministic, manifest-indexed artifact workspace
+- [x] **Phase 1: Workspace + First Adapter** - Drive one CLI headlessly into a deterministic, manifest-indexed artifact workspace (completed 2026-06-04)
 - [ ] **Phase 2: Adapter Layer + Roster + Pre-flight** - Swappable per-vendor adapters, configurable multi-vendor roster, and pre-run readiness checks
 - [ ] **Phase 3: Protocol Engine + Independence Enforcement** - 6-phase state machine with enforced turn-taking and structural draft independence
 - [ ] **Phase 4: First End-to-End Run** - One complete 3-agent run through all 6 phases producing a decision record (v1 success bar)
@@ -48,7 +48,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-03-PLAN.md — `mar invoke` CLI wiring end-to-end (turns e2e GREEN) + live human-verified smoke
+- [x] 01-03-PLAN.md — `mar invoke` CLI wiring end-to-end (turns e2e GREEN) + live human-verified smoke
 
 ### Phase 2: Adapter Layer + Roster + Pre-flight
 
@@ -119,7 +119,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace + First Adapter | 2/3 | In Progress|  |
+| 1. Workspace + First Adapter | 3/3 | Complete   | 2026-06-04 |
 | 2. Adapter Layer + Roster + Pre-flight | 0/TBD | Not started | - |
 | 3. Protocol Engine + Independence Enforcement | 0/TBD | Not started | - |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
