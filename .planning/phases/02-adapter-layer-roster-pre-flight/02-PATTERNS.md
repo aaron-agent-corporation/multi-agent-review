@@ -48,12 +48,12 @@ import { CodexEvent, type TurnResult } from "../schema/turn.js";
 import type { AgentAdapter, TurnRequest } from "./adapter.js";
 ```
 
-**buildArgv pattern** (claude.ts lines 14-16) — codex argv from RESEARCH Pattern 1 (LIVE-VERIFIED). Prompt is the TRAILING positional (matters for `redactArgv` — it replaces the arg equal to `req.promptText`):
+**buildArgv pattern** (claude.ts lines 14-16) — codex argv from RESEARCH Pattern 1 (LIVE-VERIFIED). Prompt is the TRAILING positional (matters for `redactArgv` — it replaces the arg equal to `req.promptText`). `model` is the factory-closure param (Pattern: per-vendor model flag below):
 ```typescript
 function buildArgv(promptText: string, model?: string): string[] {
   const a = ["exec", "--json", "--skip-git-repo-check", "--ephemeral", "-s", "read-only"];
-  if (model) a.push("-m", model);
-  a.push(promptText);          // trailing positional → redactArgv swaps THIS for "<prompt>"
+  if (model) a.push("-m", model);    // codex model flag
+  a.push(promptText);                // trailing positional → redactArgv swaps THIS for "<prompt>"
   return a;
 }
 ```
@@ -91,11 +91,11 @@ If no parseable terminal event is seen, treat as failure (mirror claude.ts lines
 
 **Analog:** `src/adapters/claude.ts` — structurally CLOSER to claude than codex (single JSON object, not NDJSON).
 
-**buildArgv** (RESEARCH Pattern 2, LIVE-VERIFIED flags — `--skip-trust` is REQUIRED, pin it in the flag test):
+**buildArgv** (RESEARCH Pattern 2, LIVE-VERIFIED flags — `--skip-trust` is REQUIRED, pin it in the flag test). `model` is the factory-closure param:
 ```typescript
 function buildArgv(promptText: string, model?: string): string[] {
   const a = ["-p", promptText, "--output-format", "json", "--skip-trust"];
-  if (model) a.push("-m", model);
+  if (model) a.push("-m", model);    // gemini model flag (--model alias -m)
   return a;
 }
 ```
@@ -121,15 +121,17 @@ Everything else (imports, execa options, timeout guard, TurnResult shape) — co
 
 **Analog:** the `makeClaudeAdapter(bin)` factory shape (`src/adapters/claude.ts` line 70) — three sibling factories selected by vendor.
 
-This is the ORCH-03 seam. A map keyed on the `vendor` literal returning the matching `make*Adapter`. Each entry takes the resolved `bin` (roster `bin` override or vendor default `"claude"`/`"codex"`/`"gemini"`). Adding a vendor = adding one entry, zero protocol change.
+This is the ORCH-03 seam. A map keyed on the `vendor` literal returning the matching `make*Adapter`. Each factory takes the resolved `bin` (roster `bin` override or vendor default `"claude"`/`"codex"`/`"gemini"`) and an optional `model` captured in closure. Adding a vendor = adding one entry, zero protocol change.
+
+**PINNED model-param contract (authoritative — Plan 01 / Plan 03 / Plan 05 all conform):** the registry signature is `makeAdapter(vendor, bin?, model?)` and each factory is `make*Adapter(bin?, model?)`. Both `bin` and `model` thread straight through to the factory closure. buildArgv appends the vendor model flag (codex/gemini `-m <model>`, claude `--model <model>`) when model is set. The roster (Plan 03) supplies `entry.model`; the CLI (Plan 05) threads it via `makeAdapter(vendor, bin, model)`. No deferral, no waffle.
 ```typescript
 import { makeClaudeAdapter } from "./claude.js";
 import { makeCodexAdapter } from "./codex.js";
 import { makeGeminiAdapter } from "./gemini.js";
 import type { AgentAdapter } from "./adapter.js";
 const FACTORIES = { claude: makeClaudeAdapter, codex: makeCodexAdapter, gemini: makeGeminiAdapter } as const;
-export function makeAdapter(vendor: keyof typeof FACTORIES, bin?: string): AgentAdapter {
-  return FACTORIES[vendor](bin);   // each factory defaults its own bin
+export function makeAdapter(vendor: keyof typeof FACTORIES, bin?: string, model?: string): AgentAdapter {
+  return FACTORIES[vendor](bin, model);   // each factory defaults its own bin; captures model in closure
 }
 ```
 
@@ -241,7 +243,7 @@ Probe PATH for claude/codex/gemini; write a starter `mar.config.json` listing ea
 **Analog:** the existing `invoke` command + `buildProgram()` in the SAME file (lines 230-247).
 
 - Add `program.command("init")` and `program.command("preflight")` mirroring the existing `.command("invoke").description(...).option(...).action(...)` chain (commander).
-- `invoke` change (D-20): REPLACE the hardcoded `opts.agent !== "claude"` guard (lines 92-97) and the `MAR_CLAUDE_BIN` default (line 99) with roster-name resolution → `loadConfig` + `resolveAgent` + `makeAdapter(entry.vendor, entry.bin)`. `mar invoke` stays EXEMPT from the >=2-vendor gate and does NOT auto-preflight (D-27/D-29).
+- `invoke` change (D-20): REPLACE the hardcoded `opts.agent !== "claude"` guard (lines 92-97) and the `MAR_CLAUDE_BIN` default (line 99) with roster-name resolution → `loadConfig` + `resolveAgent` + `makeAdapter(entry.vendor, entry.bin, entry.model)`. `mar invoke` stays EXEMPT from the >=2-vendor gate and does NOT auto-preflight (D-27/D-29).
 - Wrap the adapter invoke in `withRetry` (D-24) and log EVERY attempt via `logInvocation` with the new `attempt` field (D-25).
 - Keep CLI thin (RESEARCH Anti-Pattern "Building Phase-3 `mar run`"): business logic lives in `config.ts`/`preflight.ts`/`gates.ts`/`retry.ts` so Phase 3 reuses them. Preserve the existing "ONE human-readable line, never raw JSON" console discipline (lines 218-225) and "branch ONLY on turn.ok" rule (line 176 / T-01-13).
 
@@ -260,7 +262,7 @@ Probe PATH for claude/codex/gemini; write a starter `mar.config.json` listing ea
 - `FIXTURE = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url))` (lines 1-10).
 - `req(promptText, timeoutMs)` helper (lines 32-34).
 - happy / fail-auth / unparseable / `--hang` timeout cases (lines 37-86).
-- **Flag-pinning test** (lines 88-116) — the load-bearing drift guard (Pitfall 7): `vi.doMock("execa", ...)` + `vi.resetModules()` + re-import, then assert the EXACT argv. For codex assert `["exec","--json","--skip-git-repo-check","--ephemeral","-s","read-only", prompt]`; for gemini assert `["-p", prompt, "--output-format","json","--skip-trust"]` and `.not.toContain("--yolo")`. Pin EVERY flag.
+- **Flag-pinning test** (lines 88-116) — the load-bearing drift guard (Pitfall 7): `vi.doMock("execa", ...)` + `vi.resetModules()` + re-import, then assert the EXACT argv. For codex assert `["exec","--json","--skip-git-repo-check","--ephemeral","-s","read-only", prompt]`; for gemini assert `["-p", prompt, "--output-format","json","--skip-trust"]` and `.not.toContain("--yolo")`. Also pin the model variant: `make*Adapter(bin, model)` adds `["-m", model]` to the argv. Pin EVERY flag.
 - `retry.test.ts` — use vitest fake timers (`vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync`) so backoff sleeps don't slow the suite (RESEARCH); assert transient retried, fatal NOT retried, each attempt logged.
 - `config/gates/init.test.ts` — mirror `test/manifest.test.ts` (pure assertions over zod parse / pure fns / written file).
 
@@ -272,6 +274,11 @@ Probe PATH for claude/codex/gemini; write a starter `mar.config.json` listing ea
 **Source:** `src/adapters/claude.ts` lines 39-48 (already `export`ed).
 **Apply to:** codex.ts, gemini.ts, preflight.ts version tier, init.ts.
 Single-whitespace split (keeps spaced paths intact), or whole-path-if-exists. execa always receives `(cmd, argvArray, opts)` — never a shell string (T-01-05). Tests inject the fake fixture as `bin`.
+
+### Per-vendor model flag via factory-closure `model?` (PINNED contract)
+**Source:** RESEARCH STACK.md per-CLI flag tables.
+**Apply to:** codex.ts, gemini.ts, claude.ts, registry.ts.
+Each `make*Adapter(bin?, model?)` captures `model` in closure; `buildArgv(promptText, model?)` appends the vendor model flag when set — codex `-m <model>`, gemini `-m <model>` (alias of `--model`), claude `--model <model>`. The registry `makeAdapter(vendor, bin?, model?)` threads both through. Roster supplies `entry.model`; CLI threads it. TurnRequest is NOT extended — model is a factory param, not a per-request field.
 
 ### redactedCommand audit invariant (WR-04 / D-15)
 **Source:** `src/adapters/claude.ts` lines 23-28 + 78.
