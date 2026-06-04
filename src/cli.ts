@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { execa } from "execa";
@@ -10,6 +10,10 @@ import { artifactPath, newRunId, nextSeq, runDir as runDirFor } from "./workspac
 import { addArtifact, createRun, readManifest, setStatus } from "./workspace/manifest.js";
 
 const DEFAULT_TIMEOUT_MS = 600_000; // 10 min (D-17)
+
+// WR-05: cap a prompt FILE read at 10 MB, matching claude's stdin cap (claude 2.1.128+). A
+// value larger than this is treated as an error rather than silently streamed to the model.
+const MAX_PROMPT_FILE_BYTES = 10 * 1024 * 1024;
 
 // Run-id charset MUST match `newRunId` (timestamp + nanoid alphabet); no path separators or
 // "..", so a supplied --run can never escape the runs/ tree (T-01-10 tampering mitigation).
@@ -22,17 +26,35 @@ interface InvokeOptions {
   timeout?: string;
 }
 
+type ResolvedPrompt =
+  | { ok: true; promptText: string; promptRef: string }
+  | { ok: false; error: string };
+
 /**
- * Resolve --prompt: if the value is an existing file path, read its content and use the path as
- * the (loggable) reference; otherwise treat the value literally and reference it by a short label
- * — we NEVER log the full prompt body (D-15 / T-01-11).
+ * Resolve --prompt: if the value names an existing REGULAR file, read its content (bounded to
+ * {@link MAX_PROMPT_FILE_BYTES} — WR-05) and use the path as the (loggable) reference; otherwise
+ * treat the value literally and reference it by a short label. We NEVER log the full prompt body
+ * (D-15 / T-01-11).
+ *
+ * The file read is bounded so a literal value that happens to name a huge file can't silently
+ * stream unbounded content to the model; an oversize file is a hard error. A value that names a
+ * non-regular file (directory, socket, ...) falls through to literal-string handling.
  */
-function resolvePrompt(value: string): { promptText: string; promptRef: string } {
+export function resolvePrompt(value: string): ResolvedPrompt {
   if (existsSync(value)) {
-    return { promptText: readFileSync(value, "utf8"), promptRef: value };
+    const stat = statSync(value);
+    if (stat.isFile()) {
+      if (stat.size > MAX_PROMPT_FILE_BYTES) {
+        return {
+          ok: false,
+          error: `prompt file "${value}" is ${stat.size} bytes, exceeds the ${MAX_PROMPT_FILE_BYTES}-byte cap`,
+        };
+      }
+      return { ok: true, promptText: readFileSync(value, "utf8"), promptRef: value };
+    }
   }
   const label = value.length <= 32 ? value : `${value.slice(0, 29)}...`;
-  return { promptText: value, promptRef: `inline:${label}` };
+  return { ok: true, promptText: value, promptRef: `inline:${label}` };
 }
 
 /**
@@ -83,8 +105,14 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     return 2;
   }
 
-  // 2. Resolve the prompt (file-or-string); keep a loggable reference, not the body.
-  const { promptText, promptRef } = resolvePrompt(opts.prompt);
+  // 2. Resolve the prompt (file-or-string); keep a loggable reference, not the body. A prompt
+  // file read is bounded (WR-05): an oversize file is a hard error, never silently sent.
+  const resolved = resolvePrompt(opts.prompt);
+  if (!resolved.ok) {
+    process.stderr.write(`error: ${resolved.error}\n`);
+    return 2;
+  }
+  const { promptText, promptRef } = resolved;
 
   // 3. Resolve the run: create a new one, or append to an existing --run.
   let runId: string;
