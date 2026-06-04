@@ -17,8 +17,10 @@ export { splitBin };
  * subscription (OAuth/keychain) auth. The flag-pinning test asserts this exact array so a
  * future edit that drifts the flags fails loudly.
  */
-function buildArgv(promptText: string): string[] {
-  return ["-p", promptText, "--output-format", "json"];
+function buildArgv(promptText: string, model?: string): string[] {
+  const a = ["-p", promptText, "--output-format", "json"];
+  if (model) a.push("--model", model); // claude model flag (PINNED model-param contract)
+  return a;
 }
 
 /**
@@ -32,12 +34,12 @@ function buildArgv(promptText: string): string[] {
  * Unparseable stdout becomes a graceful `ok:false` TurnResult, never a crash (T-01-06).
  * A hung process is bounded by execa's wall-clock `timeout` + `forceKillAfterDelay` (T-01-07).
  */
-export function makeClaudeAdapter(bin = "claude"): AgentAdapter {
+export function makeClaudeAdapter(bin = "claude", model?: string): AgentAdapter {
   return {
     name: "claude",
     async invoke(req: TurnRequest): Promise<TurnResult> {
       const { cmd, preArgs } = splitBin(bin);
-      const argv = [...preArgs, ...buildArgv(req.promptText)];
+      const argv = [...preArgs, ...buildArgv(req.promptText, model)];
       // WR-04: the redacted argv (prompt body → placeholder) is the SAME array we spawn, so the
       // audit log and the spawn share one source of truth and can never silently diverge.
       const redactedCommand = redactArgv(argv, req.promptText);
