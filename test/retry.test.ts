@@ -3,9 +3,21 @@ import {
   classifyClaude,
   classifyCodex,
   classifyGemini,
+  DEFAULT_RETRIES,
   withRetry,
 } from "../src/retry.js";
 import type { TurnResult } from "../src/schema/turn.js";
+
+// Record every backoff delay withRetry asks for, and resolve instantly — no real waits and no
+// dependence on fake-timer interplay with node:timers/promises internals. `vi.mock` is hoisted
+// above all imports by vitest, so this intercepts the sleep withRetry imports.
+const recordedSleeps: number[] = [];
+vi.mock("node:timers/promises", () => ({
+  setTimeout: (ms?: number) => {
+    recordedSleeps.push(ms ?? 0);
+    return Promise.resolve();
+  },
+}));
 
 /** A minimal TurnResult builder — classifiers read ONLY timedOut, error, exitCode. */
 function turn(overrides: Partial<TurnResult> = {}): TurnResult {
@@ -107,9 +119,13 @@ describe("classification edge cases (D-22) — shared across vendors", () => {
   }
 });
 
-describe("withRetry (D-22..25) — fake timers, no real waits", () => {
+describe("withRetry (D-22..25) — fake timers + mocked sleep, no real waits", () => {
+  // `vi.useFakeTimers()` is asserted by the plan; the mocked node:timers/promises setTimeout
+  // (top of file) makes every backoff resolve instantly AND records the requested delay, so the
+  // suite never waits 15-60s and the backoff math is observable.
   beforeEach(() => {
     vi.useFakeTimers();
+    recordedSleeps.length = 0;
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -131,6 +147,7 @@ describe("withRetry (D-22..25) — fake timers, no real waits", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(onAttempt).toHaveBeenCalledTimes(1);
     expect(onAttempt).toHaveBeenCalledWith(expect.objectContaining({ ok: true }), 1);
+    expect(recordedSleeps).toHaveLength(0); // no backoff on success
   });
 
   it("transient twice then ok -> returns ok after 3 attempts; onAttempt 1,2,3", async () => {
@@ -142,14 +159,12 @@ describe("withRetry (D-22..25) — fake timers, no real waits", () => {
     let i = 0;
     const invoke = vi.fn(async () => results[i++]);
     const onAttempt = vi.fn();
-    const promise = withRetry(invoke, {
+    const result = await withRetry(invoke, {
       retries: 2,
       classify: transientFatal,
       onAttempt,
       baseMs: 0,
     });
-    await vi.runAllTimersAsync();
-    const result = await promise;
     expect(result.ok).toBe(true);
     expect(invoke).toHaveBeenCalledTimes(3);
     expect(onAttempt).toHaveBeenCalledTimes(3);
@@ -168,77 +183,68 @@ describe("withRetry (D-22..25) — fake timers, no real waits", () => {
     expect(result.ok).toBe(false);
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(onAttempt).toHaveBeenCalledTimes(1);
+    expect(recordedSleeps).toHaveLength(0); // never scheduled a backoff
   });
 
   it("transient on every attempt, retries:2 -> last failed result after exactly 3 attempts", async () => {
     const invoke = vi.fn(async () => turn({ ok: false, error: "transient" }));
     const onAttempt = vi.fn();
-    const promise = withRetry(invoke, {
+    const result = await withRetry(invoke, {
       retries: 2,
       classify: transientFatal,
       onAttempt,
       baseMs: 0,
     });
-    await vi.runAllTimersAsync();
-    const result = await promise;
     expect(result.ok).toBe(false);
     expect(invoke).toHaveBeenCalledTimes(3);
     expect(onAttempt).toHaveBeenCalledTimes(3);
+    // 2 backoffs between the 3 attempts; no sleep after the final exhausted attempt.
+    expect(recordedSleeps).toHaveLength(2);
   });
 
   it("backoff is exponential with jitter within [base*2^(n-1), base*2^(n-1)*1.5]", async () => {
     const invoke = vi.fn(async () => turn({ ok: false, error: "transient" }));
-    const sleeps: number[] = [];
-    const spy = vi.spyOn(globalThis, "setTimeout");
-    // Pin jitter to its max contribution (random -> 0.999...) deterministically.
+    // Pin jitter to its max contribution (random -> ~0.999) deterministically.
     const randSpy = vi.spyOn(Math, "random").mockReturnValue(0.999999);
     const base = 1000;
     const cap = 60_000;
-    const promise = withRetry(invoke, {
+    await withRetry(invoke, {
       retries: 2,
       classify: transientFatal,
       onAttempt: vi.fn(),
       baseMs: base,
       maxMs: cap,
     });
-    await vi.runAllTimersAsync();
-    await promise;
-    // Collect the delays passed to the timer scheduler (node:timers/promises uses setTimeout).
-    for (const call of spy.mock.calls) {
-      const delay = call[1];
-      if (typeof delay === "number") sleeps.push(delay);
-    }
     randSpy.mockRestore();
-    spy.mockRestore();
-    // Two sleeps (between attempt 1->2 and 2->3).
-    const backoffs = sleeps.filter((s) => s > 0);
-    expect(backoffs.length).toBeGreaterThanOrEqual(2);
+    expect(recordedSleeps).toHaveLength(2); // between attempt 1->2 and 2->3
     for (let n = 1; n <= 2; n++) {
       const expected = Math.min(cap, base * 2 ** (n - 1));
-      const lo = expected;
-      const hi = expected * 1.5;
-      expect(backoffs[n - 1]).toBeGreaterThanOrEqual(lo);
-      expect(backoffs[n - 1]).toBeLessThanOrEqual(hi + 1);
+      expect(recordedSleeps[n - 1]).toBeGreaterThanOrEqual(expected);
+      expect(recordedSleeps[n - 1]).toBeLessThanOrEqual(expected * 1.5 + 1);
     }
   });
 
   it("retryAfterMs return value overrides the computed backoff", async () => {
     const invoke = vi.fn(async () => turn({ ok: false, error: "transient" }));
-    const spy = vi.spyOn(globalThis, "setTimeout");
-    const promise = withRetry(invoke, {
+    await withRetry(invoke, {
       retries: 1,
       classify: transientFatal,
       onAttempt: vi.fn(),
       baseMs: 99_999,
       retryAfterMs: () => 7,
     });
-    await vi.runAllTimersAsync();
-    await promise;
-    const delays = spy.mock.calls
-      .map((c) => c[1])
-      .filter((d): d is number => typeof d === "number" && d > 0);
-    spy.mockRestore();
-    expect(delays).toContain(7);
-    expect(delays).not.toContain(99_999);
+    expect(recordedSleeps).toContain(7);
+    expect(recordedSleeps).not.toContain(99_999);
+  });
+
+  it("default retries is 2 (3 attempts) when wired via DEFAULT_RETRIES", async () => {
+    const invoke = vi.fn(async () => turn({ ok: false, error: "transient" }));
+    await withRetry(invoke, {
+      retries: DEFAULT_RETRIES,
+      classify: transientFatal,
+      onAttempt: vi.fn(),
+      baseMs: 0,
+    });
+    expect(invoke).toHaveBeenCalledTimes(3);
   });
 });
