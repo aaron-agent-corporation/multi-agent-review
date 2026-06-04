@@ -35,6 +35,19 @@ function resolvePrompt(value: string): { promptText: string; promptRef: string }
   return { promptText: value, promptRef: `inline:${label}` };
 }
 
+/**
+ * Parse + validate a `--timeout` value into milliseconds (WR-02). Returns the default when no
+ * value is supplied, the validated integer when valid, or `null` when the value is malformed
+ * (trailing garbage like "500abc", exponential/fractional forms like "1e3", non-positive, or
+ * non-integer). Uses `Number` (not `parseInt`) so the WHOLE string must be a clean integer.
+ */
+export function parseTimeout(value: string | undefined): number | null {
+  if (value === undefined) return DEFAULT_TIMEOUT_MS;
+  const ms = Number(value);
+  if (!Number.isInteger(ms) || ms <= 0) return null;
+  return ms;
+}
+
 /** Best-effort `claude --version` detection; "unknown" if the binary is absent/errors. */
 async function detectClaudeVersion(bin: string): Promise<string> {
   try {
@@ -62,8 +75,10 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
   }
 
   const bin = process.env.MAR_CLAUDE_BIN ?? "claude";
-  const timeoutMs = opts.timeout ? Number.parseInt(opts.timeout, 10) : DEFAULT_TIMEOUT_MS;
-  if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
+  // WR-02: validate the WHOLE string so trailing garbage ("500abc") and sub-millisecond forms
+  // ("1e3" → 1) are rejected instead of silently truncated.
+  const timeoutMs = parseTimeout(opts.timeout);
+  if (timeoutMs === null) {
     process.stderr.write(`error: --timeout must be a positive integer (ms)\n`);
     return 2;
   }
