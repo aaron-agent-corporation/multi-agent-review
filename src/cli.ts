@@ -141,7 +141,6 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     timeoutMs,
   });
 
-  const argv = ["-p", promptRef, "--output-format", "json"];
   let artifactRel: string | undefined;
   let exitCode: number;
 
@@ -175,9 +174,12 @@ async function runInvoke(opts: InvokeOptions): Promise<number> {
     exitCode = 1;
   }
 
-  // 6. ALWAYS log the invocation — even on failure (ORCH-06).
+  // 6. ALWAYS log the invocation — even on failure (ORCH-06). The command logged is the adapter's
+  // OWN redacted argv (WR-04): one source of truth shared with the spawn, never a hand-rebuilt
+  // literal that can drift from the real flags. The prompt body is already redacted by the
+  // adapter; promptRef carries the loggable reference separately (D-15).
   logInvocation(runDir, {
-    command: argv,
+    command: turn.redactedCommand,
     promptRef,
     exitCode: turn.exitCode,
     durationMs: turn.durationMs,

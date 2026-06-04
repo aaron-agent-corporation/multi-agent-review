@@ -16,6 +16,18 @@ function buildArgv(promptText: string): string[] {
 }
 
 /**
+ * The placeholder substituted for the prompt body in the redacted command (WR-04 / D-15). The
+ * audit log records the real argv with ONLY this slot swapped, so the log never carries the
+ * prompt body yet always reflects the actual flag set.
+ */
+const PROMPT_PLACEHOLDER = "<prompt>";
+
+/** Build the redacted argv (real flags, prompt body replaced) from the spawned argv. */
+function redactArgv(argv: string[], promptText: string): string[] {
+  return argv.map((a) => (a === promptText ? PROMPT_PLACEHOLDER : a));
+}
+
+/**
  * Split an injectable `bin` into an executable + leading args. The production default is the
  * bare `"claude"` (→ `["claude", []]`), but the e2e harness injects a launcher like
  * `node /path/fake-claude.mjs` via MAR_CLAUDE_BIN. execa takes a single executable plus an argv
@@ -61,6 +73,9 @@ export function makeClaudeAdapter(bin = "claude"): AgentAdapter {
     async invoke(req: TurnRequest): Promise<TurnResult> {
       const { cmd, preArgs } = splitBin(bin);
       const argv = [...preArgs, ...buildArgv(req.promptText)];
+      // WR-04: the redacted argv (prompt body → placeholder) is the SAME array we spawn, so the
+      // audit log and the spawn share one source of truth and can never silently diverge.
+      const redactedCommand = redactArgv(argv, req.promptText);
       const result = await execa(cmd, argv, {
         timeout: req.timeoutMs, // wall-clock ms; subprocess terminated on overrun (D-17)
         killSignal: "SIGTERM",
@@ -81,6 +96,7 @@ export function makeClaudeAdapter(bin = "claude"): AgentAdapter {
           exitCode: result.exitCode ?? -1,
           durationMs,
           timedOut: true,
+          redactedCommand,
           error: "timeout",
         };
       }
@@ -95,6 +111,7 @@ export function makeClaudeAdapter(bin = "claude"): AgentAdapter {
           exitCode: result.exitCode ?? -1,
           durationMs,
           timedOut: false,
+          redactedCommand,
           error: `unparseable output: ${result.stderr || "no json"}`,
         };
       }
@@ -110,6 +127,7 @@ export function makeClaudeAdapter(bin = "claude"): AgentAdapter {
         exitCode: result.exitCode ?? 0,
         durationMs: j.duration_ms ?? durationMs,
         timedOut: false,
+        redactedCommand,
         costUsd: j.total_cost_usd,
         sessionId: j.session_id,
         structuredOutput: j.structured_output,

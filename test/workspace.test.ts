@@ -95,10 +95,23 @@ describe("TurnResult schema (vendor-agnostic)", () => {
       exitCode: 0,
       durationMs: 2588,
       timedOut: false,
+      redactedCommand: ["-p", "<prompt>", "--output-format", "json"],
       costUsd: 0.19,
       sessionId: "4eea0b0a",
     });
     expect(r.success).toBe(true);
+  });
+
+  it("requires redactedCommand (WR-04)", () => {
+    const r = TurnResult.safeParse({
+      ok: true,
+      agent: "claude",
+      text: "pong",
+      exitCode: 0,
+      durationMs: 2588,
+      timedOut: false,
+    });
+    expect(r.success).toBe(false);
   });
 });
 

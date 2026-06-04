@@ -31,6 +31,13 @@ export const TurnResult = z.object({
   exitCode: z.number(),
   durationMs: z.number(),
   timedOut: z.boolean(),
+  /**
+   * The EXACT argv the adapter spawned, with the prompt body replaced by a placeholder
+   * (WR-04 / D-15). This is the single source of truth for the audit log: the CLI logs this
+   * verbatim instead of hand-rebuilding the flag set, so the log can never silently diverge
+   * from what was actually executed. The prompt body is NEVER present here.
+   */
+  redactedCommand: z.array(z.string()),
   costUsd: z.number().optional(),
   sessionId: z.string().optional(),
   structuredOutput: z.unknown().optional(),

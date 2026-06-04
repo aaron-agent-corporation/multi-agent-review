@@ -45,6 +45,18 @@ describe("makeClaudeAdapter (against fake-claude fixture)", () => {
     expect(r.costUsd).toBeCloseTo(0.19, 2);
     expect(r.sessionId).toBe("4eea0b0a");
     expect(r.error).toBeUndefined();
+    // WR-04: the adapter reports the redacted argv it actually spawned (prompt → placeholder).
+    expect(r.redactedCommand).toEqual(["-p", "<prompt>", "--output-format", "json"]);
+  });
+
+  it("WR-04: redactedCommand replaces the prompt body with a placeholder, never leaking it", async () => {
+    const adapter = makeClaudeAdapter(FIXTURE);
+    const secret = "ping super-secret-prompt-body";
+    const r = await adapter.invoke(req(secret));
+    expect(r.redactedCommand).not.toContain(secret);
+    expect(r.redactedCommand).toContain("<prompt>");
+    // The flag set is the real one the adapter spawns — one source of truth with the spawn.
+    expect(r.redactedCommand).toEqual(["-p", "<prompt>", "--output-format", "json"]);
   });
 
   it("--fail-auth → ok:false despite misleading subtype 'success' (exit 1 AND is_error)", async () => {
