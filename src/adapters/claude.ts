@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { execa } from "execa";
 import { ClaudeJson, type TurnResult } from "../schema/turn.js";
 import type { AgentAdapter, TurnRequest } from "./adapter.js";
@@ -12,6 +13,26 @@ import type { AgentAdapter, TurnRequest } from "./adapter.js";
  */
 function buildArgv(promptText: string): string[] {
   return ["-p", promptText, "--output-format", "json"];
+}
+
+/**
+ * Split an injectable `bin` into an executable + leading args. The production default is the
+ * bare `"claude"` (→ `["claude", []]`), but the e2e harness injects a launcher like
+ * `node /path/fake-claude.mjs` via MAR_CLAUDE_BIN. execa takes a single executable plus an argv
+ * array (no shell — T-01-05), so we split on the FIRST whitespace only: the leading token is the
+ * executable and the remainder is treated as a SINGLE argument (the script path). Splitting only
+ * once keeps paths that contain spaces (e.g. "Active Projects/…") intact. The production default
+ * `"claude"` has no whitespace → `{ cmd:"claude", preArgs:[] }`.
+ */
+function splitBin(bin: string): { cmd: string; preArgs: string[] } {
+  const trimmed = bin.trim();
+  // If the WHOLE value is itself an existing executable file (e.g. a fixture path that may
+  // contain spaces), use it directly — never split it. This disambiguates a spaced path from a
+  // `node <script>` launcher form.
+  if (existsSync(trimmed)) return { cmd: trimmed, preArgs: [] };
+  const i = trimmed.search(/\s/);
+  if (i === -1) return { cmd: trimmed, preArgs: [] };
+  return { cmd: trimmed.slice(0, i), preArgs: [trimmed.slice(i + 1).trim()] };
 }
 
 /** Parse JSON without throwing — returns `undefined` on any parse error. */
@@ -38,8 +59,9 @@ export function makeClaudeAdapter(bin = "claude"): AgentAdapter {
   return {
     name: "claude",
     async invoke(req: TurnRequest): Promise<TurnResult> {
-      const argv = buildArgv(req.promptText);
-      const result = await execa(bin, argv, {
+      const { cmd, preArgs } = splitBin(bin);
+      const argv = [...preArgs, ...buildArgv(req.promptText)];
+      const result = await execa(cmd, argv, {
         timeout: req.timeoutMs, // wall-clock ms; subprocess terminated on overrun (D-17)
         killSignal: "SIGTERM",
         forceKillAfterDelay: 5000, // SIGKILL escalation if it won't die
