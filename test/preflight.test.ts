@@ -3,13 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  extractVersion,
-  isFresh,
-  readCache,
-  runPreflight,
-  writeCache,
-} from "../src/preflight.js";
+import { extractVersion, isFresh, readCache, runPreflight, writeCache } from "../src/preflight.js";
 import { PreflightCache } from "../src/schema/preflight.js";
 
 // Executable fixtures (node shebang, chmod +x). Spawned directly as the roster `bin`, the adapter
