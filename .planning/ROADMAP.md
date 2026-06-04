@@ -63,7 +63,22 @@ Plans:
   3. The system refuses to start a run when the roster contains fewer than 2 distinct vendors
   4. A pre-flight check verifies each roster CLI is installed, authenticated, and responsive before the run starts, reporting any failures
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+**Wave 1** *(parallel — disjoint files)*
+
+- [ ] 02-01-PLAN.md — codex + gemini adapters + vendor->adapter registry (ORCH-03 seam; gemini fixture-built D-32)
+- [ ] 02-02-PLAN.md — vendor-agnostic withRetry wrapper + per-attempt logging (ORCH-02)
+- [ ] 02-03-PLAN.md — roster config schema/loader + vendor-distinctness gate + `mar init` (ORCH-03/04)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 02-04-PLAN.md — tiered pre-flight (version + live probe) + cache + hints (ORCH-05)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 02-05-PLAN.md — CLI wiring (`init`/`preflight`/roster `invoke`+withRetry) + live human-verify (ORCH-02/03/05)
 
 ### Phase 3: Protocol Engine + Independence Enforcement
 
@@ -120,7 +135,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
-| 2. Adapter Layer + Roster + Pre-flight | 0/TBD | Not started | - |
+| 2. Adapter Layer + Roster + Pre-flight | 0/5 | Not started | - |
 | 3. Protocol Engine + Independence Enforcement | 0/TBD | Not started | - |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |
