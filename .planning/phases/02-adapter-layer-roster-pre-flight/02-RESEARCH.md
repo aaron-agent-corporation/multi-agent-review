@@ -530,7 +530,9 @@ export const PreflightCache = z.object({
 | A7 | zod 4 `treeifyError`/`issues` is the error-formatting API | Pattern 4 | Low — verify exact API at implementation (same as Phase-1 A2) |
 | A8 | The user wants gemini in the roster despite current headless-auth breakage (vs descoping gemini to a 2-vendor claude+codex v1) | Summary / whole phase | **Med-High** — ORCH-04 needs only 2 distinct vendors, and claude+codex BOTH work live. The planner/user may choose to ship Phase 2 with claude+codex as the working pair and keep gemini as a fixture-tested, preflight-hinted adapter. **Surface for discuss-phase / user confirmation.** |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All resolved during planning: Q1 → D-32 (gemini fixture-built, preflight-hinted); Q2 → D-33 (probe "Reply with exactly: pong", ~30s, retries:0); Q3 → D-34 (mar.config.json committed).
 
 1. **Is gemini's headless auth gap blocking, or expected?**
    - What we know: gemini cannot complete a headless call on this machine (exit 41/55/1); claude+codex both work live and already satisfy ORCH-04's 2-distinct-vendor minimum.
