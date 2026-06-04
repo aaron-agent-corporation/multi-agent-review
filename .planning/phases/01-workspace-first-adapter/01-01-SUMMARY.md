@@ -116,3 +116,7 @@ No new surface beyond the plan's threat model. Mitigations applied as planned: r
 - 3641406 test(01-01): add failing tests for atomic manifest + artifact writer
 - 1a5a340 feat(01-01): atomic manifest + artifact writer + done-detection
 - 306fcf5 style(01-01): apply biome formatting to layout + tests
+
+## Self-Check: PASSED
+
+All 14 created files verified on disk; all 6 per-task commits verified in git log.
