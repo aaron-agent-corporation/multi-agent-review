@@ -496,7 +496,9 @@ export const Manifest = z.object({
 | A4 | Node 22 target is fine despite machine running Node 24 | Standard Stack | Low — set `engines` and test on 22 if CI added |
 | A5 | TS 6.0 introduces no breaking change that blocks this simple ESM project | State of the Art | Low — verify at scaffolding |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All three questions were resolved during planning: (1) RESOLVED — ship without `--bare` (CONTEXT.md D-09 amended); (2) RESOLVED — pinned `zod@^4` in Plan 01-01; (3) RESOLVED — manifest `status` enum keeps `timeout` distinct from `failed`.
 
 1. **`--bare` vs subscription auth (D-09).**
    - Known: `--bare` needs `ANTHROPIC_API_KEY` (not set); plain `-p` works on subscription. Verified live.
