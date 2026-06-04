@@ -1,13 +1,10 @@
-// RED until Plan 03 wires the CLI.
-//
-// This is the MVP skeleton anchor: an end-to-end test that drives the (not-yet-built)
-// `mar invoke` command against the fake-claude fixture and asserts the workspace
-// side effects appear on disk — a normalized artifact, a manifest, and the
-// invocations.ndjson log. It MUST FAIL now because src/cli.ts does not exist yet.
-// Plan 03 turns it green by wiring the CLI to the workspace + adapter built in
-// Plans 01 and 02.
+// End-to-end anchor: drives the `mar invoke` command against the fake-claude fixture and asserts
+// the workspace side effects appear on disk — a normalized artifact, a manifest, and the
+// invocations.ndjson log. Phase 1 wired this with a hardcoded claude path + MAR_CLAUDE_BIN; Plan
+// 02-05 switched invoke to ROSTER-NAME resolution, so the test now supplies a mar.config.json
+// whose claude entry injects the fake bin (D-19) — the env-var hardcode is gone.
 
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,22 +27,24 @@ afterAll(() => {
 });
 
 it("mar invoke produces a normalized artifact, manifest, and invocation log on disk", async () => {
-  // Drive the CLI end-to-end through tsx, pointing the adapter at the fake fixture.
+  // Supply a roster whose claude entry injects the fake bin (D-19) — invoke resolves the adapter
+  // by roster NAME, no MAR_CLAUDE_BIN env hardcode.
+  writeFileSync(
+    join(workdir, "mar.config.json"),
+    `${JSON.stringify({ agents: [{ name: "claude", vendor: "claude", bin: `node ${fakeClaude}` }] }, null, 2)}\n`,
+  );
+
+  // Drive the CLI end-to-end through tsx, pointing the adapter at the fake fixture via the roster.
   const result = await execa(
     "npx",
     ["tsx", cliEntry, "invoke", "--agent", "claude", "--prompt", "ping"],
     {
       cwd: workdir,
       reject: false,
-      env: {
-        ...process.env,
-        // The adapter must let the claude binary be injected (no hardcoded "claude").
-        MAR_CLAUDE_BIN: `node ${fakeClaude}`,
-      },
+      env: { ...process.env },
     },
   );
 
-  // The CLI entry does not exist yet → this resolves to a non-zero exit / error.
   expect(result.exitCode).toBe(0);
 
   const runsDir = join(workdir, "runs");
