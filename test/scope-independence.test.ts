@@ -32,19 +32,20 @@ function writeDraft(dir: string, agent: string, body: string): void {
 
 describe("scopedWorkdir gives each agent an isolated draft dir (PROT-04)", () => {
   it("creates work/<agent>/, copies the input as input.md, returns that dir", async () => {
-    const dir = await scopedWorkdir(runDir, "alice", inputPath);
+    const dir = await scopedWorkdir(runDir, "alice", inputPath, "claude");
     expect(dir).toBe(join(runDir, "work", "alice"));
     expect(existsSync(join(dir, "input.md"))).toBe(true);
   });
 
-  it("a scoped workdir lists ONLY input.md before drafting — no peer artifacts", async () => {
-    const dir = await scopedWorkdir(runDir, "alice", inputPath);
-    expect(readdirSync(dir)).toEqual(["input.md"]);
+  it("a scoped workdir seeds input.md + the vendor instruction file — no peer artifacts", async () => {
+    const dir = await scopedWorkdir(runDir, "alice", inputPath, "claude");
+    // The seeded contract (CLAUDE.md for a claude agent) is expected; a PEER's draft is not.
+    expect(readdirSync(dir).sort()).toEqual(["CLAUDE.md", "input.md"]);
   });
 
   it("alice's workdir does NOT contain bob's draft (cross-agent exclusion)", async () => {
-    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath);
-    const bobDir = await scopedWorkdir(runDir, "bob", inputPath);
+    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath, "claude");
+    const bobDir = await scopedWorkdir(runDir, "bob", inputPath, "codex");
     // Both agents draft independently in their own dirs.
     writeDraft(aliceDir, "alice", "alice draft");
     writeDraft(bobDir, "bob", "bob draft");
@@ -54,8 +55,8 @@ describe("scopedWorkdir gives each agent an isolated draft dir (PROT-04)", () =>
   });
 
   it("rejects an agent name with a path separator or '..' (no runDir escape)", async () => {
-    await expect(scopedWorkdir(runDir, "../evil", inputPath)).rejects.toThrow();
-    await expect(scopedWorkdir(runDir, "a/b", inputPath)).rejects.toThrow();
+    await expect(scopedWorkdir(runDir, "../evil", inputPath, "claude")).rejects.toThrow();
+    await expect(scopedWorkdir(runDir, "a/b", inputPath, "claude")).rejects.toThrow();
   });
 });
 
@@ -67,8 +68,8 @@ describe("draftFileName is the single deterministic naming source", () => {
 
 describe("promoteDrafts is the ONLY writer to shared/ for drafts (boundary promotion)", () => {
   it("shared/ has no draft before promotion, both drafts after", async () => {
-    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath);
-    const bobDir = await scopedWorkdir(runDir, "bob", inputPath);
+    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath, "claude");
+    const bobDir = await scopedWorkdir(runDir, "bob", inputPath, "codex");
     writeDraft(aliceDir, "alice", "alice draft");
     writeDraft(bobDir, "bob", "bob draft");
 
@@ -86,8 +87,8 @@ describe("promoteDrafts is the ONLY writer to shared/ for drafts (boundary promo
   });
 
   it("WR-02: a missing/empty promotion source throws a descriptive error naming the agent + path", async () => {
-    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath);
-    await scopedWorkdir(runDir, "bob", inputPath);
+    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath, "claude");
+    await scopedWorkdir(runDir, "bob", inputPath, "codex");
     writeDraft(aliceDir, "alice", "alice draft");
     // bob never wrote a draft → its promotion source is absent. The old code surfaced an opaque
     // ENOENT from fsExtra.copy; the guard now throws a message naming the agent + source path so
@@ -97,7 +98,7 @@ describe("promoteDrafts is the ONLY writer to shared/ for drafts (boundary promo
   });
 
   it("WR-02: an empty (0-byte) promotion source is treated as missing (isDone gate)", async () => {
-    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath);
+    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath, "claude");
     // 0-byte draft: exists but not "done".
     writeFileSync(join(aliceDir, draftFileName("alice")), "", "utf8");
     await expect(promoteDrafts(runDir, ["alice"])).rejects.toThrow(/alice/);
