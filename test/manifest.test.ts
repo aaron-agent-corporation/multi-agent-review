@@ -123,6 +123,35 @@ describe("artifacts (atomic write + done-detection)", () => {
     expect(leftover).toEqual([]);
   });
 
+  it("WR-06: md (the done-signal) implies its raw sibling — both present, raw never missing", async () => {
+    const rd = join(work, "runs", "a2");
+    const { path, rawPath } = await writeArtifact(rd, 1, "claude", {
+      text: "pong",
+      raw: { is_error: false, result: "pong" },
+    });
+    // The invariant the staged write guarantees: a done .md always has its .raw.json sibling.
+    expect(isDone(path)).toBe(true);
+    expect(existsSync(rawPath)).toBe(true);
+    // No half-written temps survive the paired write.
+    expect(readdirSync(rd).filter((f) => f.includes(".tmp"))).toEqual([]);
+  });
+
+  it("WR-06: a raw-write failure leaves no live .md and no temp leftovers (crash-safe pair)", async () => {
+    const rd = join(work, "runs", "a3");
+    // `raw` contains a BigInt → JSON.stringify throws while staging the raw temp, simulating a
+    // mid-pair failure. The md must NOT become a live (done) artifact, and no temp may linger.
+    await expect(
+      writeArtifact(rd, 1, "claude", {
+        text: "pong",
+        raw: { bad: 1n as unknown as number },
+      }),
+    ).rejects.toThrow();
+    const mdPath = join(rd, "001-claude-output.md");
+    expect(existsSync(mdPath)).toBe(false); // md never went live without its raw sibling
+    const leftover = existsSync(rd) ? readdirSync(rd).filter((f) => f.includes(".tmp")) : [];
+    expect(leftover).toEqual([]);
+  });
+
   it("isDone is false for missing, false for empty, true for non-empty (PROT-02)", () => {
     const missing = join(work, "nope.md");
     expect(isDone(missing)).toBe(false);

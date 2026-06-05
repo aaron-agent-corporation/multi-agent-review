@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import fsExtra from "fs-extra";
 import { artifactPath, rawPath } from "./layout.js";
 
-const { ensureDir, rename, writeFile } = fsExtra;
+const { ensureDir, remove, rename, writeFile } = fsExtra;
 
 export interface WriteArtifactOptions {
   /** The agent's text output — becomes the markdown body. */
@@ -40,16 +40,22 @@ function toFrontmatter(fields: Record<string, string | number>): string {
   return `---\n${lines.join("\n")}\n---\n`;
 }
 
-/** Write a file atomically: temp-file-then-rename on the same filesystem. */
-async function writeAtomic(finalPath: string, data: string): Promise<void> {
-  const tmpPath = `${finalPath}.tmp-${process.pid}`;
-  await writeFile(tmpPath, data, "utf8");
-  await rename(tmpPath, finalPath);
+/** The temp-file name used by the staged two-file write (single source for write + cleanup). */
+function tmpFor(finalPath: string): string {
+  return `${finalPath}.tmp-${process.pid}`;
 }
 
 /**
  * Write the normalized markdown artifact (YAML frontmatter + text body) and its sibling
- * raw-JSON file, both atomically (D-10, D-16). Returns the two paths.
+ * raw-JSON file (D-10, D-16). Returns the two paths.
+ *
+ * WR-06 (Phase 3): the PAIR is made crash-safe. Both temp files are written FIRST, then the
+ * `.raw.json` is renamed into place, then the `.md` last. Because the `.md` is the gate's
+ * done-signal (isDone), ordering its rename LAST guarantees the invariant **md-present implies
+ * raw-present**: a crash can leave a `.raw.json` with no `.md` (harmless — the gate ignores it and
+ * WR-05 keeps its seq monotonic), but never a "done" `.md` whose raw is missing (which would
+ * violate D-10). If the raw rename fails, the staged `.md` temp is best-effort removed so a
+ * half-write leaves no stray temp behind.
  */
 export async function writeArtifact(
   runDir: string,
@@ -72,8 +78,25 @@ export async function writeArtifact(
   });
   const body = `${frontmatter}\n${opts.text}\n`;
 
-  await writeAtomic(mdPath, body);
-  await writeAtomic(rawJsonPath, `${JSON.stringify(opts.raw, null, 2)}\n`);
+  // 1. Stage BOTH temp files before any rename — a crash here leaves only temps (no live artifact).
+  const mdTmp = tmpFor(mdPath);
+  const rawTmp = tmpFor(rawJsonPath);
+  await writeFile(mdTmp, body, "utf8");
+  try {
+    await writeFile(rawTmp, `${JSON.stringify(opts.raw, null, 2)}\n`, "utf8");
+  } catch (err) {
+    await remove(mdTmp).catch(() => {}); // best-effort: don't leave the md temp behind
+    throw err;
+  }
+
+  // 2. Rename raw FIRST, then md LAST. md (the done-signal) appearing last ⇒ md-present⇒raw-present.
+  try {
+    await rename(rawTmp, rawJsonPath);
+  } catch (err) {
+    await remove(mdTmp).catch(() => {});
+    throw err;
+  }
+  await rename(mdTmp, mdPath);
 
   return { path: mdPath, rawPath: rawJsonPath };
 }
