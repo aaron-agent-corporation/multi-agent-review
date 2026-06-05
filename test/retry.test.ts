@@ -202,12 +202,12 @@ describe("withRetry (D-22..25) — fake timers + mocked sleep, no real waits", (
     expect(recordedSleeps).toHaveLength(2);
   });
 
-  it("backoff is exponential with jitter within [base*2^(n-1), base*2^(n-1)*1.5]", async () => {
+  it("backoff is exponential with jitter within [base*2^(n-1), base*2^(n-1)*1.5] when below the cap", async () => {
     const invoke = vi.fn(async () => turn({ ok: false, error: "transient" }));
     // Pin jitter to its max contribution (random -> ~0.999) deterministically.
     const randSpy = vi.spyOn(Math, "random").mockReturnValue(0.999999);
     const base = 1000;
-    const cap = 60_000;
+    const cap = 60_000; // both raw values (1000, 2000) stay well below the cap here
     await withRetry(invoke, {
       retries: 2,
       classify: transientFatal,
@@ -218,9 +218,33 @@ describe("withRetry (D-22..25) — fake timers + mocked sleep, no real waits", (
     randSpy.mockRestore();
     expect(recordedSleeps).toHaveLength(2); // between attempt 1->2 and 2->3
     for (let n = 1; n <= 2; n++) {
-      const expected = Math.min(cap, base * 2 ** (n - 1));
-      expect(recordedSleeps[n - 1]).toBeGreaterThanOrEqual(expected);
-      expect(recordedSleeps[n - 1]).toBeLessThanOrEqual(expected * 1.5 + 1);
+      const raw = base * 2 ** (n - 1);
+      // raw + jitter, with jitter bounded by raw/2 → total in [raw, raw*1.5].
+      expect(recordedSleeps[n - 1]).toBeGreaterThanOrEqual(raw);
+      expect(recordedSleeps[n - 1]).toBeLessThanOrEqual(raw * 1.5 + 1);
+    }
+  });
+
+  it("WR-01: maxMs is a TRUE ceiling — jitter is added inside the cap, never on top of it", async () => {
+    const invoke = vi.fn(async () => turn({ ok: false, error: "transient" }));
+    // Max jitter: with the OLD (buggy) code (cap applied first, jitter added after) the sleep
+    // would reach cap*1.5; with the fix the total raw+jitter is clamped to cap, so the sleep
+    // must NEVER exceed cap regardless of jitter.
+    const randSpy = vi.spyOn(Math, "random").mockReturnValue(0.999999);
+    const base = 1000;
+    const cap = 1000; // raw (1000, 2000) already meets/exceeds the cap on both attempts
+    await withRetry(invoke, {
+      retries: 2,
+      classify: transientFatal,
+      onAttempt: vi.fn(),
+      baseMs: base,
+      maxMs: cap,
+    });
+    randSpy.mockRestore();
+    expect(recordedSleeps).toHaveLength(2);
+    for (const slept of recordedSleeps) {
+      // The defect this guards: old code allowed up to cap*1.5 (=1500) here.
+      expect(slept).toBeLessThanOrEqual(cap);
     }
   });
 

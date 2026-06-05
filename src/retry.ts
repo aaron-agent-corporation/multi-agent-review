@@ -114,9 +114,12 @@ export async function withRetry(
     if (opts.classify(last) === "fatal") return last; // never retry auth/clean errors (D-22)
     if (attempt > opts.retries) return last; // budget exhausted
     const ra = opts.retryAfterMs?.(last); // honor provider retry-after if present
-    const backoff = Math.min(cap, base * 2 ** (attempt - 1));
-    const jitter = Math.floor(Math.random() * (backoff / 2));
-    await sleep(ra ?? backoff + jitter);
+    // WR-01: jitter is added to the RAW exponential value and the cap is applied to the TOTAL, so
+    // `cap` is a true ceiling on the wait. (Previously the cap was applied first and jitter added
+    // after, letting an actual sleep reach 1.5×cap — the documented `maxMs` was not a real bound.)
+    const raw = base * 2 ** (attempt - 1);
+    const jitter = Math.floor(Math.random() * (raw / 2));
+    await sleep(ra ?? Math.min(cap, raw + jitter));
   }
   return last;
 }
