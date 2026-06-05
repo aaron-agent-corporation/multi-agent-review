@@ -62,6 +62,12 @@ export const Manifest = z.object({
   // the cause is never silently discarded. Optional so prior manifests and successful runs parse
   // unchanged.
   failureReason: z.string().optional(),
+  // The path to the input document this run was driven against (D-54/05-04). Recorded at run start
+  // so `mar resume` can RE-DERIVE the machine input without re-discovering the document — the
+  // original input path is not otherwise reconstructable from the artifact trail. Optional so prior
+  // manifests (written before this field) parse unchanged; `mar resume` refuses a manifest that
+  // lacks it (it cannot re-run phases without the input document).
+  inputPath: z.string().optional(),
 });
 
 export type Manifest = z.infer<typeof Manifest>;

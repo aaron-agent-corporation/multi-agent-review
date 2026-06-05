@@ -363,7 +363,8 @@ async function runRun(input: string): Promise<number> {
   // 4. Create the run (status "running"), then delegate the entire protocol to the engine.
   const runId = newRunId();
   const runDir = runDirFor(runId);
-  await createRun({ runDir, runId, status: "running" });
+  // Record the input path so `mar resume` can re-derive the machine input from disk (D-54).
+  await createRun({ runDir, runId, status: "running", inputPath: input });
   return await runProtocol(runDir, config, input);
 }
 
