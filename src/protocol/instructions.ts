@@ -28,16 +28,20 @@ const TEMPLATE_URL = new URL("../templates/agent-instructions.md.tmpl", import.m
  * scoped working folder carries, e.g., `CLAUDE.md` for a claude agent, `AGENTS.md` for codex,
  * `GEMINI.md` for gemini — byte-identical content, vendor-specific filename only.
  *
- * Ancestor-inheritance note (Pitfall 1 / T-04-03): all three CLIs walk from the git project
- * root down to cwd discovering instruction files. This repo's root holds a `CLAUDE.md` (GSD
- * workflow directives) and NO `AGENTS.md`/`GEMINI.md`. The seeded file is the NEAREST instruction
- * file in every agent's scoped cwd, so codex/gemini see only the seeded contract (no ancestor
- * AGENTS.md/GEMINI.md exists to merge in), and claude MUST be invoked with `--bare` on the live
- * adapter path to suppress the root CLAUDE.md auto-discovery. The vendor flags the live adapter
- * path must pass to neutralize ancestor/global inheritance are: claude `--bare`;
- * codex `--ignore-user-config`; gemini config-trust scoping (folder-trust off /
- * `--include-directories` limited to the scoped cwd). The hermetic spike test
- * (test/instructions.test.ts) proves the seeded file is the effective nearest contract.
+ * Ancestor-inheritance note (Pitfall 1 / T-04-03, decision reaffirmed RESEARCH Q6b): all three
+ * CLIs walk from the git project root down to cwd discovering instruction files. This repo's root
+ * holds a `CLAUDE.md` (GSD workflow directives) and NO `AGENTS.md`/`GEMINI.md`. The seeded file is
+ * the NEAREST instruction file in every agent's scoped cwd, so codex/gemini see only the seeded
+ * contract (no ancestor AGENTS.md/GEMINI.md exists to merge in). Neutralization is achieved by TWO
+ * mechanisms, NOT by claude `--bare`: (1) the seeded vendor file is the nearest instruction file in
+ * the scoped cwd, and (2) the template carries an explicit "read THIS folder's contract as the sole
+ * format contract; ignore any ancestor or global instructions" directive. claude `--bare` is
+ * deliberately OMITTED on the live adapter (claude.ts) — it reads ONLY `ANTHROPIC_API_KEY` and
+ * breaks subscription/OAuth auth; live run 20260605-MlhRzU measured ZERO GSD-language leakage
+ * without it. Per-vendor config scoping that DOES apply where relevant: codex
+ * `--ignore-user-config`; gemini config-trust scoping (folder-trust off / `--include-directories`
+ * limited to the scoped cwd). The hermetic spike test (test/instructions.test.ts) proves the seeded
+ * file is the effective nearest contract.
  */
 export async function seedInstructions(workdir: string, vendor: Vendor): Promise<void> {
   const template = await readFile(fileURLToPath(TEMPLATE_URL), "utf8");

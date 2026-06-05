@@ -38,17 +38,22 @@ export function draftFileName(agent: string): string {
  * not a prompt request. The returned path is meant to be passed as the adapter's scoped `cwd` for
  * the draft phase.
  *
- * Ancestor-inheritance neutralization (Pitfall 1 / T-04-03): all three CLIs walk from the git
- * project root down to cwd discovering instruction files, so this repo's own root instruction
- * files would otherwise dilute the seeded format contract. The neutralization (RESEARCH option 3)
- * relies on two facts proven by the spike test in test/instructions.test.ts:
+ * Ancestor-inheritance neutralization (Pitfall 1 / T-04-03, decision reaffirmed RESEARCH Q6b): all
+ * three CLIs walk from the git project root down to cwd discovering instruction files, so this
+ * repo's own root instruction files would otherwise dilute the seeded format contract. The
+ * neutralization (RESEARCH option 3) relies on two facts proven by the spike test in
+ * test/instructions.test.ts:
  *   1. The seeded vendor file lands in the agent's scoped cwd, making it the NEAREST instruction
  *      file (codex/gemini honor the nearest; no ancestor AGENTS.md/GEMINI.md exists at this repo
  *      root — only CLAUDE.md does), and
- *   2. The live adapter path MUST pass each vendor's ancestor/global-suppression flag:
- *      claude `--bare`; codex `--ignore-user-config`; gemini config-trust scoping
- *      (folder-trust off / `--include-directories` limited to the scoped cwd).
- * This keeps the seeded format contract the only instruction set in effect (success criterion #2).
+ *   2. The seeded template carries an explicit "read THIS folder's contract as the sole format
+ *      contract; ignore any ancestor or global instructions" directive.
+ * claude `--bare` is deliberately OMITTED on the live adapter (claude.ts) — it breaks
+ * subscription/OAuth auth, and the live run measured zero GSD-language leakage without it; it is
+ * NOT the neutralization mechanism. Per-vendor config scoping that DOES apply where relevant:
+ * codex `--ignore-user-config`; gemini config-trust scoping (folder-trust off /
+ * `--include-directories` limited to the scoped cwd). This keeps the seeded format contract the
+ * only instruction set in effect (success criterion #2).
  */
 export async function scopedWorkdir(
   runDir: string,
