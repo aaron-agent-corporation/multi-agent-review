@@ -567,16 +567,6 @@ async function runPhaseGated(
   // roster. Every other phase fans out over all survivors. The gate's expectedParticipantCount
   // independently expects exactly 1 writer for the integrator phase, so a redundant non-integrator
   // merge (or a missing merge) fails the gate.
-  // RE-LITIGATION ENFORCEMENT (D-62/D-64): before INTEGRATION and VALIDATION fan-out, drop any
-  // incoming position that reopens a settled ledger decision (drop + warn, no retry — the run
-  // continues; the terminal record notes it). Integration builds on the response positions; validation
-  // builds on the integration positions. Run at the boundary BEFORE the upcoming phase fans out.
-  if (phase.name === "integration") {
-    await enforceRelitigation(input.runDir, "response");
-  } else if (phase.name === "validation") {
-    await enforceRelitigation(input.runDir, "integration");
-  }
-
   const fanoutRoster =
     phase.participants === "integrator"
       ? [designateIntegrator(roster, designatedIntegrator)]
@@ -629,6 +619,15 @@ async function runPhaseGated(
     requiredArtifactsExist(writtenPaths) &&
     writtenPaths.length === expectedParticipantCount(phase, survivors);
   if (passes) {
+    // RE-LITIGATION ENFORCEMENT (D-62/D-64): a phase's just-written positions are checked against the
+    // forks settled by EARLIER phases (the ledger as it stands BEFORE this phase's own settlements are
+    // appended). A position reopening a previously-settled decision is DROPPED (drop + warn, no retry —
+    // the run CONTINUES; the terminal record notes it). Integration positions are checked against the
+    // response/convergence settlements; validation positions against the integration settlements.
+    // Enforcing-then-appending in this order avoids a phase self-matching its own new settlements.
+    if (phase.name === "integration" || phase.name === "validation") {
+      await enforceRelitigation(input.runDir, phase.kind);
+    }
     // LEDGER APPEND (D-63): after a phase settles, append its newly-settled contested forks to the
     // rolling shared/resolved-decisions.md ledger (sequential boundary — no concurrent writer,
     // Pitfall 7). PINNED resolvers: response concessions → "convergence"; integrator calls →

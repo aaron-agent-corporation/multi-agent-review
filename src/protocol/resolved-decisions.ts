@@ -215,7 +215,11 @@ function collectDecisionIds(frontmatter: unknown): string[] {
       if (a && typeof a === "object") {
         const ref = (a as Record<string, unknown>).additionRef;
         if (ref !== undefined && ref !== null) {
+          // The integration-namespaced id (this addition's own decision id) AND the RAW additionRef:
+          // an integration addition that names a settled earlier-phase id (e.g. a `response-…-issue-…`
+          // id) in its additionRef is REOPENING that settled decision — caught by the raw match.
           ids.push(`integration-${String(ref)}`);
+          ids.push(String(ref));
         }
       }
     }
