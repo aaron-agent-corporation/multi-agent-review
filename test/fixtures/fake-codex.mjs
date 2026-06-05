@@ -14,11 +14,26 @@
 //   --emit <kind>    → happy NDJSON envelope, but the agent_message text is the kind-tagged
 //                      marker "codex:<kind>" so a multi-phase run yields distinct per-phase
 //                      artifacts while preserving the verified NDJSON shape. (additive.)
+//   MAR_PLANTED_MODE=1 (env) → A/B INDEPENDENCE PROOF mode (test/planted-error.test.ts), codex twin
+//                      of the fake-claude logic. Env-activated (the injectable `bin` is split on the
+//                      first whitespace only, so extra bin flags can't survive). Output depends on
+//                      the phase (parsed from the prompt positional `phase: <name>`) AND on what the
+//                      agent can SEE on the filesystem:
+//                        • draft  → agent_message "VALUE=<V>", <V> = this agent's value from the JSON
+//                                   env map MAR_PLANTED_VALUES keyed by the scoped cwd basename
+//                                   (work/<agent>/).
+//                        • review → reads peer drafts promoted into ./shared/, collects VALUE=
+//                                   tokens, and emits "DISCREPANCY values=..." on disagreement or
+//                                   "AGREED value=..." when they match. Independence (a scoped draft
+//                                   phase) is what lets a divergent value reach shared/ and surface
+//                                   the discrepancy a shared-consensus control would mask.
+//                        • other  → "codex:<phase>".
+//                      Hermetic: reads only local files under cwd + env.
 //   --hang           → never exits (for timeout/kill tests)
 // The prompt is read from argv but is not required.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 
 const args = process.argv.slice(2);
 
@@ -28,18 +43,70 @@ function emitKind() {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
 
+/** True when the A/B independence-proof mode is active (env-activated; see header). */
+function plantedMode() {
+  return process.env.MAR_PLANTED_MODE === "1";
+}
+
+/** This agent's privately-held draft value from MAR_PLANTED_VALUES keyed by scoped cwd basename. */
+function plantedValue() {
+  try {
+    const map = JSON.parse(process.env.MAR_PLANTED_VALUES ?? "{}");
+    return map[basename(process.cwd())] ?? "none";
+  } catch {
+    return "none";
+  }
+}
+
+/** The protocol phase, parsed from the engine's prompt positional `phase: <name>` in argv. */
+function phaseFromArgv() {
+  for (const a of args) {
+    const m = /phase:\s*(\w+)/.exec(a);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
+/** Locate the run's shared/ dir; probe ./shared then runs/<id>/shared (see fake-claude). */
+function sharedDir() {
+  const direct = join(process.cwd(), "shared");
+  if (existsSync(direct)) return direct;
+  const runsDir = join(process.cwd(), "runs");
+  if (existsSync(runsDir)) {
+    for (const id of readdirSync(runsDir)) {
+      const candidate = join(runsDir, id, "shared");
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+/** Distinct VALUE= tokens across every promoted peer draft under the run's shared/ (see fake-claude). */
+function peerValues() {
+  const dir = sharedDir();
+  if (!dir) return [];
+  const values = new Set();
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith("-draft.md")) continue;
+    const body = readFileSync(join(dir, name), "utf8");
+    const m = /VALUE=(\S+)/.exec(body);
+    if (m) values.add(m[1]);
+  }
+  return [...values];
+}
+
 /** Write one NDJSON event line to stdout. */
 function emit(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
 }
 
-/** Emit the happy-path NDJSON sequence and exit 0. */
-function emitHappy() {
+/** Emit a verified NDJSON success sequence whose agent_message text is `body`, then exit 0. */
+function emitMessage(body) {
   emit({ type: "thread.started", thread_id: "019e941a-ok" });
   emit({ type: "turn.started" });
   emit({
     type: "item.completed",
-    item: { id: "item_0", type: "agent_message", text: "pong" },
+    item: { id: "item_0", type: "agent_message", text: body },
   });
   emit({
     type: "turn.completed",
@@ -53,9 +120,29 @@ function emitHappy() {
   process.exit(0);
 }
 
+/** Emit the happy-path NDJSON sequence ("pong") and exit 0. */
+function emitHappy() {
+  emitMessage("pong");
+}
+
 if (args.includes("--hang")) {
   // Never exit — lets a wall-clock timeout test kill us.
   setInterval(() => {}, 1e9);
+} else if (plantedMode()) {
+  // A/B independence proof: phase- and filesystem-aware output (see header).
+  const phase = phaseFromArgv();
+  if (phase === "draft") {
+    emitMessage(`VALUE=${plantedValue()}`);
+  } else if (phase === "review") {
+    const vals = peerValues();
+    emitMessage(
+      vals.length > 1
+        ? `DISCREPANCY values=${vals.join(",")}`
+        : `AGREED value=${vals[0] ?? "none"}`,
+    );
+  } else {
+    emitMessage(`codex:${phase ?? "unknown"}`);
+  }
 } else if (emitKind() !== undefined) {
   // Per-phase marker mode: same verified NDJSON success sequence, agent_message tagged by kind.
   emit({ type: "thread.started", thread_id: "019e941a-ok" });
