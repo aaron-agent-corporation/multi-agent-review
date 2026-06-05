@@ -73,10 +73,23 @@ export async function addArtifact(runDir: string, entry: ManifestArtifact): Prom
   return next;
 }
 
-/** Set run status, bump updatedAt, atomically persist. */
-export async function setStatus(runDir: string, status: ManifestStatus): Promise<Manifest> {
+/**
+ * Set run status, bump updatedAt, atomically persist. When `failureReason` is supplied (a terminal
+ * `failed`/`timeout`), it is recorded so the cause of an unsuccessful run is never discarded (CR-01).
+ * Passing it as `undefined` on a successful transition leaves any prior reason untouched.
+ */
+export async function setStatus(
+  runDir: string,
+  status: ManifestStatus,
+  failureReason?: string,
+): Promise<Manifest> {
   const current = await readManifest(runDir);
-  const next: Manifest = { ...current, status, updatedAt: new Date().toISOString() };
+  const next: Manifest = {
+    ...current,
+    status,
+    updatedAt: new Date().toISOString(),
+    ...(failureReason !== undefined ? { failureReason } : {}),
+  };
   await writeManifestAtomic(runDir, next);
   return next;
 }

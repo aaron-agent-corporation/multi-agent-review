@@ -193,15 +193,30 @@ async function runPhase(
 }
 
 /**
+ * Why a phase failed the run, threaded back to {@link runProtocol} so the terminal status preserves
+ * the cause instead of collapsing every non-success into a blanket `failed` (CR-01). `timedOut`
+ * routes the run to the schema's distinct `timeout` status (D-17); `reason` is the human-readable
+ * cause persisted to the manifest's `failureReason`.
+ */
+interface PhaseFailure {
+  reason: string;
+  timedOut: boolean;
+}
+
+/** A phase outcome: the surviving roster to carry forward, or a structured failure cause (CR-01). */
+type PhaseOutcome = { survivors: AgentEntry[] } | { failure: PhaseFailure };
+
+/**
  * Run a phase AND decide its outcome, applying partial-failure handling (D-30) and the artifacts
- * gate (PROT-03) together. Returns the surviving roster to carry into the next phase, or `null` to
- * fail the run. Steps:
+ * gate (PROT-03) together. Returns the surviving roster to carry into the next phase, or a
+ * {@link PhaseFailure} carrying WHY the run must fail (so the cause is never discarded — CR-01).
+ * Steps:
  *
  *   1. Fan out over the current roster (runPhase) → writtenPaths + ok/failed partition.
  *   2. If any agent failed, apply `applySkipFailed(survivors, failed)`. It re-asserts the
  *      >=2-distinct-vendor invariant over the SURVIVORS, so dropping can never silently produce a
- *      single-vendor run. If it throws, the run fails (return null). Each dropped agent is recorded
- *      in the manifest's audit list (never a silent drop).
+ *      single-vendor run. If it throws, the run fails. Each dropped agent is recorded in the
+ *      manifest's audit list (never a silent drop).
  *   3. Gate the phase on EXACTLY the survivors' written paths: every path isDone AND the written
  *      count equals the expected participant count for the SURVIVING roster (so a survivor that
  *      claimed success but wrote a short/0-byte artifact still fails the gate, PROT-03 / Pitfall 3).
@@ -213,8 +228,13 @@ async function runPhaseGated(
   phase: Phase,
   roster: AgentEntry[],
   input: ProtocolInput,
-): Promise<AgentEntry[] | null> {
+): Promise<PhaseOutcome> {
   const { writtenPaths, ok, failed } = await runPhase(phase, roster, input);
+
+  // A failure is a timeout iff EVERY failing agent timed out (the per-agent reason is the literal
+  // "timeout" string set in runPhase). A mixed batch is reported as a generic failure — only an
+  // all-timeout failure preserves the distinct D-17 `timeout` status.
+  const failedTimedOut = failed.length > 0 && failed.every((f) => f.reason === "timeout");
 
   // Partial-failure handling: drop the failed agents, but only if >=2 distinct vendors survive.
   let survivors = ok;
@@ -227,7 +247,14 @@ async function runPhaseGated(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stdout.write(`  ✗ cannot continue: ${msg}\n`);
-      return null;
+      // Preserve the underlying cause (e.g. an all-timeout drop below the 2-vendor floor → timeout).
+      const reasons = failed.map((f) => `${f.entry.name}: ${f.reason}`).join("; ");
+      return {
+        failure: {
+          reason: `phase ${phase.name} cannot continue: ${msg} (${reasons})`,
+          timedOut: failedTimedOut,
+        },
+      };
     }
     // Record each drop in the manifest audit trail (sequential — outside any fan-out).
     for (const f of failed) {
@@ -247,31 +274,55 @@ async function runPhaseGated(
   const passes =
     requiredArtifactsExist(writtenPaths) &&
     writtenPaths.length === expectedParticipantCount(phase, survivors);
-  return passes ? survivors : null;
+  if (passes) return { survivors };
+  // Gate failure: distinguish a survivor short-write (a real gate miss) from a still-open cause.
+  return {
+    failure: {
+      reason: `phase ${phase.name} gate failed: wrote ${writtenPaths.length}/${expectedParticipantCount(
+        phase,
+        survivors,
+      )} required artifact(s)`,
+      timedOut: false,
+    },
+  };
 }
 
 interface ProtocolContext {
   input: ProtocolInput;
   /** The LIVE surviving roster, shrinking as agents are dropped (D-30). */
   roster: AgentEntry[];
+  /** Set on the failure path so {@link runProtocol} can persist the cause + pick timeout vs failed. */
+  failure?: PhaseFailure;
 }
 
-/** A phase actor resolves with the surviving roster (continue) or null (fail the run). */
-type PhaseEvent = { output: AgentEntry[] | null };
+/** A phase actor resolves with the surviving roster (continue) or a structured failure (fail). */
+type PhaseEvent = { output: PhaseOutcome };
+
+/** An XState `onError` event carrying the thrown actor error (the cause the engine must surface). */
+type ErrorEvent = { error: unknown };
+
+/** Build a PhaseFailure from a thrown actor error (promote/internal), preserving its message (CR-01). */
+function failureFromError(prefix: string, error: unknown): PhaseFailure {
+  const msg = error instanceof Error ? error.message : String(error);
+  return { reason: `${prefix}: ${msg}`, timedOut: false };
+}
 
 /**
  * The 6-phase protocol as an XState v5 machine. Each phase is a state that invokes a `fromPromise`
  * actor running {@link runPhaseGated} over the LIVE roster; the actor resolves with the surviving
- * roster (continue) or null (fail). A guard advances only on a non-null survivor set and assigns it
- * to context so the next phase fans out over the shrunken roster. The draft state runs
- * `promoteDrafts` (PROT-04 boundary) as a dedicated awaited actor in a transient `promote` state
- * placed BETWEEN draft and review, promoting ONLY the surviving drafters. On any failure the
- * machine routes to a `failed` final state; on all 6 passing, to `done`. Terminal `setStatus` is
+ * roster (continue) or a structured {@link PhaseFailure} (fail). A guard advances only on a
+ * `survivors` outcome and assigns it to context so the next phase fans out over the shrunken roster;
+ * the failure branch records the cause into context so {@link runProtocol} can persist it and pick
+ * the right terminal status (CR-01). The draft state runs `promoteDrafts` (PROT-04 boundary) as a
+ * dedicated awaited actor in a transient `promote` state placed BETWEEN draft and review, promoting
+ * ONLY the surviving drafters. On any failure the machine routes to a `failed` final state — and the
+ * actual error (gate reason, agent timeout, or an actor's `onError` cause) is captured in
+ * `context.failure` rather than discarded. On all 6 passing, to `done`. Terminal `setStatus` is
  * applied by {@link runProtocol} off the resolved final state so no async action races the manifest.
  */
 function buildMachine() {
   const phaseActor = fromPromise<
-    AgentEntry[] | null,
+    PhaseOutcome,
     { phase: Phase; roster: AgentEntry[]; input: ProtocolInput }
   >(({ input }) => runPhaseGated(input.phase, input.roster, input.input));
   const promoteActor = fromPromise<void, { roster: AgentEntry[]; input: ProtocolInput }>(
@@ -300,15 +351,30 @@ function buildMachine() {
         }),
         onDone: [
           {
-            guard: ({ event }: { event: PhaseEvent }) => event.output !== null,
+            guard: ({ event }: { event: PhaseEvent }) => "survivors" in event.output,
             target: next,
             actions: assign({
-              roster: ({ event }: { event: PhaseEvent }) => event.output as AgentEntry[],
+              roster: ({ event }: { event: PhaseEvent }) =>
+                (event.output as { survivors: AgentEntry[] }).survivors,
             }),
           },
-          { target: "failed" },
+          {
+            // Gated failure (gate miss, agent timeout, sub-2-vendor drop): keep the cause.
+            target: "failed",
+            actions: assign({
+              failure: ({ event }: { event: PhaseEvent }) =>
+                (event.output as { failure: PhaseFailure }).failure,
+            }),
+          },
         ],
-        onError: { target: "failed" },
+        // Actor threw (unexpected internal error): capture event.error instead of swallowing it.
+        onError: {
+          target: "failed",
+          actions: assign({
+            failure: ({ event }: { event: ErrorEvent }) =>
+              failureFromError(`phase ${phase.name} actor error`, event.error),
+          }),
+        },
       },
     };
   }
@@ -323,7 +389,13 @@ function buildMachine() {
         input: context.input,
       }),
       onDone: { target: "review" },
-      onError: { target: "failed" },
+      onError: {
+        target: "failed",
+        actions: assign({
+          failure: ({ event }: { event: ErrorEvent }) =>
+            failureFromError("draft->review promotion failed", event.error),
+        }),
+      },
     },
   };
 
@@ -344,6 +416,12 @@ function buildMachine() {
 /**
  * Drive an input document through the 6-phase review protocol. Returns 0 when the run completes,
  * non-zero when a phase gate fails or survivors drop below 2 distinct vendors. PROT-01/03/04, D-30.
+ *
+ * The terminal status preserves the CAUSE (CR-01): a failure whose every dropped agent timed out is
+ * recorded as the schema's distinct `timeout` status (D-17 observability); any other failure is
+ * `failed`. The human-readable cause — gate reason, agent timeout, sub-2-vendor drop, or an
+ * engine-internal actor error captured from `onError` — is persisted to the manifest's
+ * `failureReason` and mirrored to stderr, so the reason is never silently discarded.
  */
 export async function runProtocol(
   runDir: string,
@@ -354,8 +432,18 @@ export async function runProtocol(
   const actor = createActor(machine, { input: { runDir, config, inputPath } });
   actor.start();
   await toPromise(actor);
-  const final = actor.getSnapshot().value;
-  const ok = final === "done";
-  await setStatus(runDir, ok ? "completed" : "failed");
-  return ok ? 0 : 1;
+  const snapshot = actor.getSnapshot();
+  if (snapshot.value === "done") {
+    await setStatus(runDir, "completed");
+    return 0;
+  }
+  // Failure: prefer the cause captured in context; fall back to a generic reason if (defensively)
+  // the machine reached a non-`done` final state without recording one.
+  const failure = snapshot.context.failure ?? {
+    reason: `protocol ended in non-success state "${String(snapshot.value)}"`,
+    timedOut: false,
+  };
+  process.stderr.write(`protocol error: ${failure.reason}\n`);
+  await setStatus(runDir, failure.timedOut ? "timeout" : "failed", failure.reason);
+  return 1;
 }

@@ -43,6 +43,11 @@ export const Manifest = z.object({
   // Agents dropped mid-run by partial-failure handling (D-30). Optional/defaulted so existing
   // manifests (and the common all-healthy run) parse unchanged.
   droppedAgents: z.array(DroppedAgent).default([]),
+  // Human-readable cause of a terminal `failed`/`timeout` status (CR-01). Records WHY a protocol
+  // run ended unsuccessfully (the failing agent/gate reason, or an engine-internal actor error) so
+  // the cause is never silently discarded. Optional so prior manifests and successful runs parse
+  // unchanged.
+  failureReason: z.string().optional(),
 });
 
 export type Manifest = z.infer<typeof Manifest>;
