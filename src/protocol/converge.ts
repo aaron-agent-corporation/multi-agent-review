@@ -31,6 +31,15 @@ export interface ConvergenceResult {
   concessions: string[];
   /** Present only on `escalated`: the unresolved fork flagged for human review (D-42). */
   openDecision?: { reason: string };
+  /**
+   * Which mechanism settled this resolution (D-61), mirroring `schema/resolved-decisions.ts Resolver`
+   * (the vocabulary is single-sourced there as a zod enum; this is the structural TS union of the same
+   * members). Additive/optional like `openDecision`. `convergence` = unanimous agreement (Guard 1);
+   * `majority` = the post-cap/deadlock `> rosterSize/2` clear-majority tie-break (D-59). The escalate
+   * fallback path leaves this UNSET — no clear majority settled it. The 05-06 decision-record sources
+   * this provenance.
+   */
+  resolver?: "convergence" | "majority" | "integrator" | "human";
 }
 
 /**
@@ -124,6 +133,28 @@ function mostSupportedBase(signals: RoundSignal[]): string | null {
 }
 
 /**
+ * The CLEAR-MAJORITY tie-break base (D-59), or null when no base clears the threshold. A clear
+ * majority is the highest-count base whose count is STRICTLY `> rosterSize/2` — a real majority of the
+ * surviving roster, not a mere plurality. This is deliberately NOT `mostSupportedBase`, which returns
+ * the leader even on a 1-1 tie (a plurality): reusing it would wrongly resolve the D-60 escalate cases
+ * (2-vendor 1-1, 3-vendor 1-1-1), where 1 is not `> half` of the roster (Pitfall 3). Used ONLY at the
+ * exit boundary (post-cap/deadlock) to break a tie BEFORE escalating — never injected into a round
+ * prompt (D-59 anti-anchoring). `rosterSize` is the SURVIVING roster size (so a dropped agent does not
+ * inflate the threshold beyond what could ever be met).
+ */
+function clearMajority(signals: RoundSignal[], rosterSize: number): string | null {
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [base, count] of tallyBases(signals)) {
+    if (count > bestCount) {
+      best = base;
+      bestCount = count;
+    }
+  }
+  return best !== null && bestCount > rosterSize / 2 ? best : null;
+}
+
+/**
  * Agreement guard (A3): true iff there is ≥1 signal AND every survivor proposes the SAME base AND no
  * survivor carries an open disagreement. Computed purely from the validated artifact fields — never a
  * model self-report. An empty signal set is NOT agreement (fails closed).
@@ -203,11 +234,27 @@ export async function runConvergence(
         rounds: round,
         status: "agreed",
         concessions,
+        resolver: "convergence",
       };
     }
 
-    // Guard 2: cap reached (D-41c) — hard DoS backstop (T-04-12). Escalate with a fallback base.
+    // Guard 2: cap reached (D-41c) — hard DoS backstop (T-04-12). The evidence-grounded loop has run
+    // out of rounds without unanimity. Before escalating, try the CLEAR-MAJORITY tie-break (D-59):
+    // if a real majority of the surviving roster (> rosterSize/2) proposes one base, resolve the fork
+    // `agreed` via that base with resolver:"majority" instead of escalating. No clear majority → fall
+    // through to escalate exactly as before. The tally is read ONLY here at the exit boundary.
     if (round === cap) {
+      const majorityBase = clearMajority(signals, roster.length);
+      if (majorityBase !== null) {
+        return {
+          base: majorityBase,
+          integrator: integratorFor(majorityBase, signals),
+          rounds: round,
+          status: "agreed",
+          concessions,
+          resolver: "majority",
+        };
+      }
       return escalate(
         signals,
         round,
@@ -228,6 +275,20 @@ export async function runConvergence(
       stableStuckRounds = 0;
     }
     if (stableStuckRounds >= UNRESOLVABLE_STABLE_ROUNDS) {
+      // Deadlock detected. Before escalating, try the CLEAR-MAJORITY tie-break (D-59): a real majority
+      // of the surviving roster (> rosterSize/2) on one base resolves the fork `agreed` via
+      // resolver:"majority". No clear majority (e.g. 2-vendor 1-1, 3-vendor 1-1-1, D-60) → escalate.
+      const majorityBase = clearMajority(signals, roster.length);
+      if (majorityBase !== null) {
+        return {
+          base: majorityBase,
+          integrator: integratorFor(majorityBase, signals),
+          rounds: round,
+          status: "agreed",
+          concessions,
+          resolver: "majority",
+        };
+      }
       return escalate(
         signals,
         round,
