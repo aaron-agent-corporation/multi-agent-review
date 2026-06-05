@@ -50,6 +50,14 @@ export const MarConfig = z
         // mar.config.json. Lives inside the `.prefault({})` block (NOT `.default`) so the nested
         // default fires when `defaults` is omitted (zod v4 prefault-re-parses; default does not).
         convergenceCap: z.number().int().positive().default(10),
+        // mode (PROT-05 / D-50/D-53): the per-run execution mode. `autonomous` runs every phase
+        // unattended (no pauses); `gated` pauses at each phase boundary for human approval. The
+        // run-start interactive prompt (TTY) and the explicit `--mode`/`--gated`/`--autonomous`
+        // flags OVERRIDE this per run — this is only the fallback for a config-only, non-TTY,
+        // no-flag run. Default `autonomous` so an unattended/CI run never blocks (Pitfall 5). Lives
+        // inside the `.prefault({})` block (NOT `.default`) so the nested default fires when
+        // `defaults` is omitted (zod v4 prefault re-parses; default does not).
+        mode: z.enum(["autonomous", "gated"]).default("autonomous"),
       })
       .prefault({}),
   })
