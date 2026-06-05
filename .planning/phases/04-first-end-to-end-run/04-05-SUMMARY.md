@@ -3,7 +3,7 @@ phase: 04-first-end-to-end-run
 plan: 05
 subsystem: protocol / decision-record writer + terminal wiring + v1 success bar
 tags: [RCRD-01, RSLV-01, D-46, D-47, D-48, D-49, decision-record, gray-matter, hermetic-3-vendor]
-status: checkpoint-pending
+status: complete
 requires:
   - "src/schema/decision-record.ts DecisionRecordFrontmatter (resolved/open/tally/runChain, 04-01)"
   - "src/schema/response.ts Verdict union + src/schema/integration.ts AdditionVerdict union (04-01/04-03)"
@@ -41,7 +41,7 @@ decisions:
 metrics:
   duration: "~25 minutes"
   completed: "2026-06-05"
-  tasks: "2 of 3 (Task 3 is a LIVE human-verify checkpoint — pending)"
+  tasks: "3 of 3 (Task 3 LIVE checkpoint APPROVED by user 2026-06-05, run 20260605-MlhRzU)"
   files: 4
   tests_added: 3
 ---
@@ -154,3 +154,37 @@ success bar requires the human-run checkpoint below. See the executor return for
   test/protocol-run.e2e.test.ts (modified).
 - FOUND commits: 957512a (Task 1), 3e4f51c (Task 2) — both in git log.
 - Full suite 267/267, tsc clean, biome clean.
+
+
+## Task 3 Resolution — LIVE 3-vendor checkpoint (D-48) APPROVED
+
+Approved by the user on 2026-06-05 against live run `runs/20260605-MlhRzU` after three live
+runs and two checkpoint-resolution fixes:
+
+- **Run 1 (20260605-K4DwSP):** completed 6 phases but claude-1 was dropped at review
+  (validation-failed). Root cause: format contract never specified the output channel;
+  claude attempted a file write, hit its headless permission gate, emitted staging prose.
+  User judged this below the D-48 true-3-vendor bar.
+- **Fix 1 (a2b91ab):** OUTPUT CHANNEL section added to agent-instructions.md.tmpl.
+- **Run 2 (20260605-MYPrO2):** aborted at review — claude still prefixed preamble prose
+  (frontmatter not at position 0 → zero data), and gemini's unquoted colon threw a
+  YAMLException that bypassed the validation-retry path entirely.
+- **Fix 2 (d629a8a):** tolerant frontmatter reader (falls back to first `---` delimiter;
+  schema validation stays strict per D-38) + YAML parse exceptions converted to validation
+  errors that feed the one-retry path + template mandates double-quoted string values.
+  Replay-verified against both raw failed turns.
+- **Run 3 (20260605-MlhRzU): PASSED.** All 3 vendors survived review/response/validation;
+  19 contested resolutions with rationale + lineage, 0 open decisions, 20 unanimous items
+  excluded; format contract held; zero GSD-language leakage (04-02 neutralization verified
+  live). Per-round convergence dropouts (gemini r1, claude r2) tolerated by design.
+
+### Known gaps surfaced by the live checkpoint (for verifier / gap closure)
+
+1. **Dist packaging bug:** `npm run build` (tsc) does not copy
+   `src/templates/agent-instructions.md.tmpl` into `dist/`, so the compiled `mar` binary
+   fails at draft fan-out (ENOENT). Live runs used `tsx` from source as a workaround.
+2. **D-09/04-02 `--bare` decision unimplemented:** the claude adapter pins
+   `-p … --output-format json` without `--bare`; the repo root CLAUDE.md is therefore in
+   claude's context on live runs. In tension with CLAUDE.md-based contract seeding
+   (`--bare` would skip the seeded file too) — needs a design call (e.g. explicit
+   `--append-system-prompt-file` or prompt-directed Read).
