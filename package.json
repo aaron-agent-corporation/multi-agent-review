@@ -20,6 +20,7 @@
     "commander": "^15",
     "execa": "^9",
     "fs-extra": "^11",
+    "gray-matter": "^4.0.3",
     "nanoid": "^5",
     "pino": "^10",
     "xstate": "^5.32.0",
