@@ -18,10 +18,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Protocol (phases & workspace)
 
-- [ ] **PROT-01**: User can start a run on any input document; the run progresses through all 6 phases (independent drafts → cross-review → responses → evaluation → integration → validation) with enforced turn-taking
+- [x] **PROT-01**: User can start a run on any input document; the run progresses through all 6 phases (independent drafts → cross-review → responses → evaluation → integration → validation) with enforced turn-taking
 - [x] **PROT-02**: Each turn produces a deterministically named artifact file in the run's workspace; the artifact trail is the authoritative run state
-- [ ] **PROT-03**: Phase N+1 cannot start until all required phase-N artifacts exist
-- [ ] **PROT-04**: During drafting, an agent's working context physically cannot include another agent's draft (scoped workspaces; drafts promoted to shared area only at the phase boundary)
+- [x] **PROT-03**: Phase N+1 cannot start until all required phase-N artifacts exist
+- [x] **PROT-04**: During drafting, an agent's working context physically cannot include another agent's draft (scoped workspaces; drafts promoted to shared area only at the phase boundary)
 - [ ] **PROT-05**: User can choose per run: fully autonomous, or gated (run pauses for human approval at each phase boundary)
 - [ ] **PROT-06**: User can resume an interrupted run from the last completed phase without re-running prior phases
 - [x] **PROT-07**: Run has an ID, status, and a manifest indexing all artifacts and phase completion
@@ -94,9 +94,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ORCH-03 | Phase 2 | Complete |
 | ORCH-04 | Phase 2 | Complete |
 | ORCH-05 | Phase 2 | Complete |
-| PROT-01 | Phase 3 | Pending |
-| PROT-03 | Phase 3 | Pending |
-| PROT-04 | Phase 3 | Pending |
+| PROT-01 | Phase 3 | Complete |
+| PROT-03 | Phase 3 | Complete |
+| PROT-04 | Phase 3 | Complete |
 | REVW-01 | Phase 4 | Pending |
 | REVW-02 | Phase 4 | Pending |
 | REVW-03 | Phase 4 | Pending |

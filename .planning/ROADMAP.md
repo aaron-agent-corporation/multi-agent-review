@@ -102,7 +102,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 03-02-PLAN.md — XState v5 protocol engine (6-phase loop + artifacts-on-disk gate) + `mar run` wiring (PROT-01/03/04); anchor GREEN
+- [x] 03-02-PLAN.md — XState v5 protocol engine (6-phase loop + artifacts-on-disk gate) + `mar run` wiring (PROT-01/03/04); anchor GREEN
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -149,6 +149,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
 | 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
-| 3. Protocol Engine + Independence Enforcement | 1/3 | In Progress|  |
+| 3. Protocol Engine + Independence Enforcement | 2/3 | In Progress|  |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |
