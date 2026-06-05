@@ -53,6 +53,8 @@ export interface CreateRunOptions {
   runId: string;
   cliVersions?: Record<string, string>;
   status?: ManifestStatus;
+  /** The input document path this run was driven against (recorded for `mar resume` re-derivation). */
+  inputPath?: string;
 }
 
 /**
@@ -70,6 +72,7 @@ export async function createRun(opts: CreateRunOptions): Promise<Manifest> {
     cliVersions: opts.cliVersions ?? {},
     artifacts: [],
     droppedAgents: [],
+    ...(opts.inputPath !== undefined ? { inputPath: opts.inputPath } : {}),
   };
   await writeManifestAtomic(opts.runDir, manifest);
   return manifest;

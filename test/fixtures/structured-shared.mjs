@@ -10,6 +10,8 @@
 // `--emit <kind>` / `--emit-malformed <kind>` flags drive the same generators directly for the
 // validation-retry test and the Task-3 verify command.
 
+import { existsSync } from "node:fs";
+
 /** Extract the phase name from a `[phase:<name>]` prompt tag in argv, or undefined. */
 export function phaseFromArgs(args) {
   for (const a of args) {
@@ -179,13 +181,38 @@ export function malformedBody(kind, author) {
 }
 
 /**
+ * FAIL-ONCE marker mechanism (PROT-06 / D-57 resume tests). When the env `MAR_FAIL_ONCE` names this
+ * author AND a marker file exists at `MAR_FAIL_ONCE_MARKER`, this author's engine-driven turn emits a
+ * MALFORMED structured body for the current phase — so its turn fails validation (after the one
+ * retry) and the agent is dropped. The TEST controls the toggle: it creates the marker before the
+ * FIRST `mar run` (the agent fails, the run fails below the vendor floor), then DELETES the marker
+ * before `mar resume` (the agent now emits a valid turn and rejoins with the FULL roster, D-57).
+ *
+ * Marker-file (not env-toggle) is the portable form: the same env is passed to BOTH `mar` invocations
+ * via `process.env`, and only the marker's presence — which the test flips between runs — changes the
+ * behavior. Returns the malformed body when armed for an engine phase, else undefined (fall through).
+ */
+function failOnceBody(author, args) {
+  if (process.env.MAR_FAIL_ONCE !== author) return undefined;
+  const marker = process.env.MAR_FAIL_ONCE_MARKER;
+  if (!marker || !existsSync(marker)) return undefined;
+  const phase = phaseFromArgs(args);
+  if (phase === undefined) return undefined;
+  return malformedBody(phase, author);
+}
+
+/**
  * Resolve the body a fixture should emit, given its `author` and argv. Honors (in priority order):
+ *   MAR_FAIL_ONCE (env)      → malformed body for the engine phase while the marker file exists
+ *                              (resume fail-once mechanism, D-57)
  *   --emit-malformed <kind>  → malformed structured body (validation-retry RED path)
  *   --emit <kind>            → schema-valid structured body for <kind>
  *   [phase:<name>] tag       → schema-valid structured body for the engine-driven phase
  * Returns undefined when none apply (the caller falls through to its other modes).
  */
 export function resolveEmitBody(author, args) {
+  const failOnce = failOnceBody(author, args);
+  if (failOnce !== undefined) return failOnce;
   const malformedKind = flagValue(args, "--emit-malformed");
   if (malformedKind !== undefined) return malformedBody(malformedKind, author);
   const emitKind = flagValue(args, "--emit");
