@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Workspace + First Adapter** - Drive one CLI headlessly into a deterministic, manifest-indexed artifact workspace (completed 2026-06-04)
 - [x] **Phase 2: Adapter Layer + Roster + Pre-flight** - Swappable per-vendor adapters, configurable multi-vendor roster, and pre-run readiness checks (completed 2026-06-04)
 - [x] **Phase 3: Protocol Engine + Independence Enforcement** - 6-phase state machine with enforced turn-taking and structural draft independence (completed 2026-06-05)
-- [ ] **Phase 4: First End-to-End Run** - One complete 3-agent run through all 6 phases producing a decision record (v1 success bar)
+- [x] **Phase 4: First End-to-End Run** - One complete 3-agent run through all 6 phases producing a decision record (v1 success bar) (completed 2026-06-05)
 - [ ] **Phase 5: Hardening — Resume, Gating, Majority, Guards** - Resumable runs, configurable human gating, majority-signal tie-breaking, and re-litigation guards
 
 ## Phase Details
@@ -140,7 +140,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 04-05-PLAN.md — decision-record writer + full 3-agent hermetic e2e (success #1) + true 3-vendor LIVE human-verify checkpoint (RCRD-01, RSLV-01, D-45/46/47/48)
+- [x] 04-05-PLAN.md — decision-record writer + full 3-agent hermetic e2e (success #1) + true 3-vendor LIVE human-verify checkpoint (RCRD-01, RSLV-01, D-45/46/47/48)
 
 ### Phase 5: Hardening — Resume, Gating, Majority, Guards
 
@@ -168,5 +168,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
 | 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
 | 3. Protocol Engine + Independence Enforcement | 3/3 | Complete   | 2026-06-05 |
-| 4. First End-to-End Run | 4/5 | In Progress|  |
+| 4. First End-to-End Run | 5/5 | Complete   | 2026-06-05 |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |
