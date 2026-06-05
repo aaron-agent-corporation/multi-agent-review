@@ -87,3 +87,42 @@ it("mar run drives a 2-vendor roster through all 6 phases (RED anchor for Plan 0
     expect(kinds.filter((k) => k === phase).length).toBe(2);
   }
 });
+
+it("refuses <2 vendors (single-vendor roster → exit 2, no run started)", async () => {
+  // A single-vendor roster (two claude agents) must be refused by assertReviewable BEFORE any run
+  // directory is created. `mar run` is NOT gate-exempt (unlike `mar invoke`).
+  const singleVendorDir = mkdtempSync(join(tmpdir(), "mar-run-1vendor-"));
+  try {
+    writeFileSync(
+      join(singleVendorDir, "mar.config.json"),
+      `${JSON.stringify(
+        {
+          agents: [
+            { name: "claude-a", vendor: "claude", bin: `node ${fakeClaude}` },
+            { name: "claude-b", vendor: "claude", bin: `node ${fakeClaude}` },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const inputPath = join(singleVendorDir, "input.md");
+    writeFileSync(inputPath, "# doc\n", "utf8");
+
+    const result = await execa("npx", ["tsx", cliEntry, "run", inputPath], {
+      cwd: singleVendorDir,
+      reject: false,
+      env: { ...process.env },
+    });
+
+    // (a) non-zero exit (2 — gate refusal).
+    expect(result.exitCode).toBe(2);
+    // (b) the >=2-distinct-vendor refusal message from assertReviewable is on stderr.
+    expect(result.stderr).toContain("review needs >=2 distinct vendors");
+    // (c) NO run directory was created — the gate fires BEFORE createRun.
+    expect(existsSync(join(singleVendorDir, "runs"))).toBe(false);
+  } finally {
+    rmSync(singleVendorDir, { recursive: true, force: true });
+  }
+});

@@ -6,9 +6,11 @@ import { execa } from "execa";
 import { splitBin } from "./adapters/common.js";
 import { makeAdapter } from "./adapters/registry.js";
 import { loadConfig, resolveAgent } from "./config.js";
+import { assertReviewable } from "./gates.js";
 import { detectVendors, writeStarterConfig } from "./init.js";
 import { logInvocation } from "./log/invocation.js";
 import { extractVersion, formatStatusLines, runPreflight } from "./preflight.js";
+import { runProtocol } from "./protocol/engine.js";
 import {
   type Classify,
   classifyClaude,
@@ -317,6 +319,59 @@ async function runPreflightCmd(): Promise<number> {
   return allPass ? 0 : 1;
 }
 
+/**
+ * `mar run <input>` — drive an input document through the full 6-phase review protocol. THIN
+ * controller (02-05 thin-CLI rule): it loads the roster, enforces the run-start gates, validates
+ * the input path, creates the run, then delegates ALL phase/business logic to runProtocol. The CLI
+ * builds NO vendor argv and contains no phase logic.
+ *
+ * Unlike `mar invoke`, `mar run` is NOT gate-exempt: it MUST pass assertReviewable (>=2 distinct
+ * vendors, D-29) — single-vendor review is out of scope. It does NOT auto-run preflight (D-27).
+ */
+async function runRun(input: string): Promise<number> {
+  // 1. Load the roster (clear missing/invalid errors → exit 2).
+  let config: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    config = await loadConfig();
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+
+  // 2. Run-start diversity gate (NOT exempt): refuse a <2-distinct-vendor roster BEFORE any run is
+  //    created. The thrown message names the vendors found.
+  try {
+    assertReviewable(config.agents);
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+
+  // 3. Validate <input>: an existing REGULAR file bounded to MAX_PROMPT_FILE_BYTES (WR-05),
+  //    reusing the resolvePrompt/statSync discipline. A missing/oversize/non-regular file → exit 2.
+  if (!existsSync(input)) {
+    process.stderr.write(`error: input "${input}" does not exist\n`);
+    return 2;
+  }
+  const inputStat = statSync(input);
+  if (!inputStat.isFile()) {
+    process.stderr.write(`error: input "${input}" is not a regular file\n`);
+    return 2;
+  }
+  if (inputStat.size > MAX_PROMPT_FILE_BYTES) {
+    process.stderr.write(
+      `error: input "${input}" is ${inputStat.size} bytes, exceeds the ${MAX_PROMPT_FILE_BYTES}-byte cap\n`,
+    );
+    return 2;
+  }
+
+  // 4. Create the run (status "running"), then delegate the entire protocol to the engine.
+  const runId = newRunId();
+  const runDir = runDirFor(runId);
+  await createRun({ runDir, runId, status: "running" });
+  return await runProtocol(runDir, config, input);
+}
+
 export function buildProgram(): Command {
   const program = new Command();
   program.name("mar").description("Multi-Agent Review orchestrator");
@@ -350,6 +405,14 @@ export function buildProgram(): Command {
     .description("Check each roster agent (installed/responsive) and print a status table")
     .action(async () => {
       process.exitCode = await runPreflightCmd();
+    });
+
+  program
+    .command("run")
+    .description("Run the 6-phase review protocol on an input document")
+    .argument("<input>", "path to the input document")
+    .action(async (input: string) => {
+      process.exitCode = await runRun(input);
     });
 
   return program;
