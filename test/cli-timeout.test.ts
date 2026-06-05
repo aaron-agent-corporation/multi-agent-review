@@ -31,4 +31,17 @@ describe("parseTimeout (WR-02: strict whole-string validation)", () => {
     expect(parseTimeout("abc")).toBeNull();
     expect(parseTimeout("")).toBeNull();
   });
+
+  it("WR-04: rejects hex forms that Number() would silently coerce", () => {
+    // Number("0x10") === 16 — a surprising 16ms timeout that kills every real run.
+    expect(parseTimeout("0x10")).toBeNull();
+    expect(parseTimeout("0X1F4")).toBeNull();
+  });
+
+  it("WR-04: rejects leading/trailing whitespace forms", () => {
+    // Number("  500  ") === 500; the documented contract is a CLEAN integer with no padding.
+    expect(parseTimeout("  500  ")).toBeNull();
+    expect(parseTimeout("500 ")).toBeNull();
+    expect(parseTimeout(" 500")).toBeNull();
+  });
 });

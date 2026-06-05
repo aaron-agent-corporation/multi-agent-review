@@ -79,12 +79,19 @@ export function resolvePrompt(value: string): ResolvedPrompt {
 /**
  * Parse + validate a `--timeout` value into milliseconds (WR-02). Returns `undefined` when no
  * value is supplied (caller falls back to the roster's effective timeout), the validated integer
- * when valid, or `null` when the value is malformed (trailing garbage like "500abc",
- * exponential/fractional forms like "1e3", non-positive, or non-integer). Uses `Number` (not
- * `parseInt`) so the WHOLE string must be a clean integer.
+ * when valid, or `null` when the value is malformed (trailing garbage like "500abc", fractional
+ * forms like "1.5", hex like "0x10", surrounding whitespace like "  500  ", non-positive, or
+ * non-integer). A decimal-or-scientific-integer regex gates the WHOLE string BEFORE `Number`
+ * coercion, so the contract is a genuinely clean integer ("1e3" → 1000 is still accepted).
  */
 export function parseTimeout(value: string | undefined): number | null | undefined {
   if (value === undefined) return undefined;
+  // WR-04: `Number()` alone also coerces hex ("0x10" → 16) and surrounding-whitespace forms
+  // ("  500  " → 500), neither of which is the documented "clean integer". Gate on a
+  // decimal-or-scientific-integer shape FIRST (no leading/trailing whitespace, no 0x), then let
+  // Number do the conversion. "1e3" stays accepted (it coerces to the integer 1000); "0x10",
+  // "  500  ", "1.5", and "500abc" are now rejected.
+  if (!/^\d+(e\d+)?$/i.test(value)) return null;
   const ms = Number(value);
   if (!Number.isInteger(ms) || ms <= 0) return null;
   return ms;
