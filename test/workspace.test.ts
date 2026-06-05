@@ -47,9 +47,15 @@ describe("seq derivation (WR-03: monotonic over all turns)", () => {
     expect(seqFromArtifactName("012-claude-draft.md")).toBe(12);
   });
 
+  it("WR-05: seqFromArtifactName also counts the .raw.json sibling (orphan-safe)", () => {
+    // A crash between writeArtifact's two atomic writes can leave a .raw.json with no .md. Seq
+    // derivation MUST see it so a resumed run never reuses the seq and overwrites the orphan raw.
+    expect(seqFromArtifactName("001-claude-output.raw.json")).toBe(1);
+    expect(seqFromArtifactName("012-claude-draft.raw.json")).toBe(12);
+  });
+
   it("seqFromArtifactName returns null for non-artifact names", () => {
     expect(seqFromArtifactName("manifest.json")).toBeNull();
-    expect(seqFromArtifactName("001-claude-output.raw.json")).toBeNull();
     expect(seqFromArtifactName("invocations.ndjson")).toBeNull();
   });
 
@@ -72,6 +78,12 @@ describe("seq derivation (WR-03: monotonic over all turns)", () => {
 
   it("nextSeq tolerates relative paths in the manifest by taking the basename", () => {
     expect(nextSeq(["runs/r1/005-claude-output.md"], [])).toBe(6);
+  });
+
+  it("WR-05: nextSeq advances past an orphan .raw.json with no .md sibling", () => {
+    // Manifest knows seq 1; on disk an orphan seq-2 .raw.json (no .md, no manifest entry) exists.
+    // nextSeq must return 3 so the resumed turn never reuses seq 2 and clobbers the orphan raw.
+    expect(nextSeq(["001-claude-output.md"], ["001-claude-output.md", "002-claude-draft.raw.json"])).toBe(3);
   });
 });
 

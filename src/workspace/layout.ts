@@ -48,12 +48,18 @@ export function rawPath(runDirPath: string, seq: number, agent: string, kind = "
 }
 
 /**
- * Extract the leading zero-padded seq from an artifact filename (`<seq>-<agent>-<kind>.md`),
- * or `null` when the name does not match the deterministic pattern. Used to derive the next
- * monotonic seq from files already on disk (WR-03).
+ * Extract the leading zero-padded seq from an artifact filename, or `null` when the name does not
+ * match the deterministic pattern. Used to derive the next monotonic seq from files already on
+ * disk (WR-03).
+ *
+ * WR-05 (Phase 3): match BOTH the `.md` artifact AND its `.raw.json` sibling. A turn that crashed
+ * between writeArtifact's two atomic writes can leave an orphan `NNN-agent-kind.raw.json` with no
+ * `.md` and no manifest entry. If seq derivation only saw `.md` files, a resumed run would reuse
+ * that seq and silently overwrite the orphan raw JSON, breaking the D-10 "raw never discarded"
+ * guarantee. Counting the `.raw.json` sibling keeps seq monotonic over the half-written pair too.
  */
 export function seqFromArtifactName(name: string): number | null {
-  const m = /^(\d+)-.+\.md$/.exec(name);
+  const m = /^(\d+)-.+\.(?:md|raw\.json)$/.exec(name);
   if (!m) return null;
   const n = Number.parseInt(m[1], 10);
   return Number.isInteger(n) ? n : null;
