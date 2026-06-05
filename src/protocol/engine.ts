@@ -722,40 +722,38 @@ export function rehydrateRoster(config: MarConfig, manifest: Manifest): AgentEnt
 }
 
 /**
- * Walk PHASES in order and return the FIRST phase whose required artifacts are NOT all present for
- * `roster` (the resume entry point). Reuses the gate's completeness notion: a phase is COMPLETE iff
- * the manifest records at least `expectedParticipantCount(phase, roster)` artifacts of that phase's
- * kind AND each exists on disk (isDone). A completed phase may carry MORE than the resume roster
- * expects (an agent dropped later wrote here before being dropped) — hence `>=`.
+ * Walk PHASES in order and return the FIRST phase the MANIFEST does not record as complete for
+ * `roster` (the resume entry point). A phase is COMPLETE iff the manifest records at least
+ * `expectedParticipantCount(phase, roster)` artifacts of that phase's kind. A completed phase may
+ * carry MORE than the resume roster expects (an agent dropped later wrote here before being dropped)
+ * — hence `>=`.
+ *
+ * Derivation is from the MANIFEST COUNT only — NOT from file existence on disk. The manifest is the
+ * authority on what each prior attempt completed; whether those recorded files are still intact is a
+ * separate D-56 integrity concern owned by {@link revalidateForResume} (which refuses on a missing/
+ * empty/corrupt completed-phase artifact). Mixing the two here would silently RE-RUN a phase whose
+ * recorded artifact was deleted/tampered instead of refusing (the D-56 tamper boundary).
  *
  * The evaluation phase is special (D-54 / Q4): it runs as the bounded convergence loop writing
  * per-round `evaluation-r<n>` kinds, and its terminal output is the designated base+integrator held
  * only in machine context, not on disk. Per D-54 the simplest correct rule is to re-run convergence
  * from round 1 whenever it is not provably done — so evaluation is treated COMPLETE iff at least one
- * `integration` artifact exists (integration consumes the convergence result, so its presence proves
- * convergence resolved). Otherwise evaluation is the resume point and convergence restarts at round 1.
- *
- * `runDir` resolves each recorded (run-dir-relative) artifact path to an absolute path for `isDone`.
+ * `integration` artifact is recorded (integration consumes the convergence result, so its presence
+ * proves convergence resolved). Otherwise evaluation is the resume point and convergence restarts at
+ * round 1.
  */
-export function firstIncompletePhase(
-  runDir: string,
-  manifest: Manifest,
-  roster: AgentEntry[],
-): Phase {
+export function firstIncompletePhase(manifest: Manifest, roster: AgentEntry[]): Phase {
   const countOfKind = (kind: string): number =>
     manifest.artifacts.filter((a) => a.kind === kind).length;
-  const allDone = (kind: string): boolean =>
-    manifest.artifacts.filter((a) => a.kind === kind).every((a) => isDone(join(runDir, a.path)));
 
   for (const phase of PHASES) {
     if (phase.name === "evaluation") {
-      // Complete iff an integration artifact exists (proves convergence resolved). Else resume here.
+      // Complete iff an integration artifact is recorded (proves convergence resolved). Else resume.
       if (countOfKind("integration") < 1) return phase;
       continue;
     }
     const expected = expectedParticipantCount(phase, roster);
-    const have = countOfKind(phase.kind);
-    if (have < expected || !allDone(phase.kind)) return phase;
+    if (countOfKind(phase.kind) < expected) return phase;
   }
   // Every phase satisfied — defensively resume at the final phase (validation) so the run still
   // re-derives forward to `done`. (Callers refuse terminal-done runs before reaching here.)
@@ -862,7 +860,7 @@ export async function resumeProtocol(runDir: string, config: MarConfig): Promise
 
   // Rehydrate the roster by reason (D-57) and derive the resume phase from disk (D-54).
   const roster = rehydrateRoster(config, manifest);
-  const resumePhase = firstIncompletePhase(runDir, manifest, roster);
+  const resumePhase = firstIncompletePhase(manifest, roster);
 
   // D-56: re-validate the completed-phase trail + roster preflight before continuing.
   const check = await revalidateForResume(runDir, config, manifest, roster, resumePhase);
