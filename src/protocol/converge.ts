@@ -1,10 +1,9 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import matter from "gray-matter";
 import type { AgentEntry } from "../schema/config.js";
 import { EvaluationFrontmatter } from "../schema/evaluation.js";
 import { readManifest } from "../workspace/manifest.js";
 import { type ProtocolInput, runPhase } from "./engine.js";
+import { readAgentFrontmatter } from "./frontmatter.js";
 import { PHASES, type Phase } from "./phases.js";
 
 /**
@@ -70,29 +69,18 @@ function roundPhase(round: number): Phase {
 }
 
 /**
- * Read the agent's emitted evaluation frontmatter back from a written round artifact. The on-disk
- * `.md` carries the engine-metadata frontmatter block FIRST (agent/seq/kind/timestamp/runId/phase —
- * see writeArtifact); the AGENT'S own frontmatter lives in the body AFTER it. So we parse twice:
- * `matter(file)` strips the engine block, then `matter(outer.content)` parses the agent's frontmatter
- * — the same "validate the agent's emitted frontmatter, not the wrapper" rule the engine's validation
- * gate follows (04-03). Returns null when the artifact is missing or its agent frontmatter does not
- * satisfy the 04-01 EvaluationFrontmatter schema (a non-signal — that agent simply does not count
- * toward agreement this round).
+ * Read the agent's emitted evaluation frontmatter back from a written round artifact. Delegates the
+ * WHERE-is-the-frontmatter read to the ONE shared tolerant reader (`readAgentFrontmatter`, Pitfall 4):
+ * it strips the engine-metadata wrapper and tolerantly finds the agent's frontmatter even when the
+ * model emitted preamble prose before it — the previous strict double-parse here would have silently
+ * returned empty data for such an artifact. Schema validation stays STRICT (fail-closed, D-38): the
+ * EvaluationFrontmatter.safeParse below is unchanged, so a missing/malformed signal still returns null
+ * (a non-signal — that agent simply does not count toward agreement this round).
  */
 async function readEvaluationSignal(path: string): Promise<RoundSignal | null> {
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch {
-    return null;
-  }
-  // Strip the engine-metadata wrapper, then parse the agent's frontmatter from the inner body. The
-  // engine writes the agent body as `\n${text}` after its wrapper block, so `outer.content` has a
-  // leading newline; gray-matter only recognizes a frontmatter block at the VERY START of the input,
-  // so we trimStart() before the inner parse or the agent frontmatter is silently missed (data: {}).
-  const outer = matter(raw);
-  const inner = matter(outer.content.trimStart());
-  const parsed = EvaluationFrontmatter.safeParse(inner.data);
+  const data = await readAgentFrontmatter(path);
+  if (data === null) return null;
+  const parsed = EvaluationFrontmatter.safeParse(data);
   if (!parsed.success) return null;
   return {
     author: parsed.data.author,
