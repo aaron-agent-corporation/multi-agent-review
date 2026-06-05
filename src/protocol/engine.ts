@@ -17,6 +17,7 @@ import { nextSeq } from "../workspace/layout.js";
 import { addArtifact, addDroppedAgent, readManifest, setStatus } from "../workspace/manifest.js";
 import { promoteDrafts, scopedWorkdir } from "../workspace/scope.js";
 import { type ConvergenceResult, runConvergence } from "./converge.js";
+import { writeDecisionRecord } from "./decision-record.js";
 import { expectedParticipantCount, requiredArtifactsExist } from "./gate.js";
 import { PHASES, type Phase } from "./phases.js";
 
@@ -613,6 +614,13 @@ export async function runProtocol(
     // unresolved fork is observable; the open decision itself is logged in the 04-05 record. Any
     // other completed run is `completed`.
     const escalated = snapshot.context.convergence?.status === "escalated";
+    // Terminal step (RCRD-01): assemble + write the run's decision record from the artifact trail.
+    // Written on BOTH `completed` and `escalated` outcomes — an escalated run still produced a merged
+    // fallback artifact and an open decision, so it must still yield its record (the open decision is
+    // exactly what a human reviews). Runs in the same terminal position as setStatus, off the resolved
+    // final snapshot, so no async action races the manifest. A hard failed/timeout run skips it
+    // (handled below — the run produced no convergence/integration trail to record).
+    await writeDecisionRecord(runDir, snapshot.context.convergence);
     await setStatus(runDir, escalated ? "escalated" : "completed");
     return 0;
   }

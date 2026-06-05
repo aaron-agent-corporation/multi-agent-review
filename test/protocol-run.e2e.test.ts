@@ -16,7 +16,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
+import matter from "gray-matter";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { DecisionRecordFrontmatter } from "../src/schema/decision-record.js";
 
 // Cold `npx tsx` startup (~5s) under concurrent load can exceed the default 15s; a generous
 // timeout absorbs harness startup, not a hang.
@@ -26,6 +28,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = join(here, "..");
 const fakeClaude = join(here, "fixtures", "fake-claude.mjs");
 const fakeCodex = join(here, "fixtures", "fake-codex.mjs");
+const fakeGemini = join(here, "fixtures", "fake-gemini.mjs");
 const cliEntry = join(repoRoot, "src", "cli.ts");
 
 // The 6 protocol phases, in order. The engine writes one artifact per agent per phase.
@@ -92,6 +95,75 @@ it("mar run drives a 2-vendor roster through all 6 phases (RED anchor for Plan 0
   for (const phase of PHASE_KINDS) {
     const expected = phase === "integration" ? 1 : 2;
     expect(kinds.filter((k) => k === phase).length).toBe(expected);
+  }
+});
+
+it("mar run drives a 3-vendor roster through all 6 phases and produces a decision record (success criterion #1, D-49)", async () => {
+  // The full v1 success bar, proven hermetically: THREE distinct vendors (claude + codex + gemini),
+  // each injecting its fake fixture bin so the run burns zero credits. Every fixture emits
+  // schema-valid structured artifacts across all 6 phases via the engine's `[phase:<name>]` tag, and
+  // MAR_EMIT_BASE pins a common proposedBase so the convergence loop AGREES on round 1.
+  const threeVendorDir = mkdtempSync(join(tmpdir(), "mar-run-3vendor-"));
+  try {
+    writeFileSync(
+      join(threeVendorDir, "mar.config.json"),
+      `${JSON.stringify(
+        {
+          agents: [
+            { name: "claude", vendor: "claude", bin: `node ${fakeClaude}` },
+            { name: "codex", vendor: "codex", bin: `node ${fakeCodex}` },
+            { name: "gemini", vendor: "gemini", bin: `node ${fakeGemini}` },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const inputPath = join(threeVendorDir, "input.md");
+    writeFileSync(inputPath, "# document under review\n\nA three-agent proposal.\n", "utf8");
+
+    const result = await execa("npx", ["tsx", cliEntry, "run", inputPath], {
+      cwd: threeVendorDir,
+      reject: false,
+      // Pin the convergence base so all three fixtures agree on round 1 (status `completed`).
+      env: { ...process.env, MAR_EMIT_BASE: "claude" },
+    });
+
+    // (a) The full 3-agent run completes with status `completed`.
+    expect(result.exitCode).toBe(0);
+
+    const runsDir = join(threeVendorDir, "runs");
+    const runIds = readdirSync(runsDir);
+    expect(runIds.length).toBe(1);
+    const runDir = join(runsDir, runIds[0]);
+
+    const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
+    expect(manifest.status).toBe("completed");
+
+    // (b) One artifact per surviving agent per structured phase kind: 3 agents × 5 phases + 1
+    // integrator (REVW-04) = 16.
+    const kinds = manifest.artifacts.map((a) => a.kind);
+    for (const phase of PHASE_KINDS) {
+      const expected = phase === "integration" ? 1 : 3;
+      expect(kinds.filter((k) => k === phase).length).toBe(expected);
+    }
+
+    // (c) The run produced a decision record that validates against DecisionRecordFrontmatter
+    // (success criterion #1: the full 3-agent run yields a decision record).
+    const recordPath = join(runDir, "decision-record.md");
+    expect(existsSync(recordPath)).toBe(true);
+    const parsed = DecisionRecordFrontmatter.safeParse(
+      matter(readFileSync(recordPath, "utf8")).data,
+    );
+    expect(parsed.success).toBe(true);
+    // The unanimous-agreement run records the merged addition + accepted responses as the tally.
+    if (parsed.success) {
+      expect(parsed.data.runId).toBe(manifest.runId);
+      expect(parsed.data.unanimousTally).toBeGreaterThan(0);
+    }
+  } finally {
+    rmSync(threeVendorDir, { recursive: true, force: true });
   }
 });
 
