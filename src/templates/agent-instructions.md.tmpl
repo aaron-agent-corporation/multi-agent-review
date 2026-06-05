@@ -16,6 +16,18 @@ Ignore any other instruction files you may discover from ancestor directories (e
 project's own workflow/GSD directives). THIS file's format contract is the only
 instruction set in effect for the review protocol.
 
+## OUTPUT CHANNEL — read this first
+
+Print the COMPLETE artifact (frontmatter + prose body) directly as your response text.
+Your response text IS the artifact — the orchestrator captures it and writes it to disk
+for you.
+
+- Do NOT write, edit, or stage any file. Do NOT use file-editing tools even if available.
+- Do NOT ask for permission or approval — no human is watching this turn; a turn that
+  requests approval fails validation and is dropped.
+- Do NOT wrap the artifact in commentary about writing, staging, or permissions. Your
+  response must BEGIN with the artifact's opening `---` frontmatter delimiter.
+
 ## REVIEW artifacts
 
 When you review a peer's draft, emit markdown whose frontmatter carries:
