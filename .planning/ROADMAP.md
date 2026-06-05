@@ -122,7 +122,25 @@ Plans:
   4. Exactly one integrator is designated after an evidence-grounded evaluation step, and only that integrator merges, reviewing proposed additions before patching
   5. The decision record captures resolved decisions with rationale, open decisions, and artifact lineage; each integrator resolution is logged with its rationale
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+**Wave 1** *(parallel — disjoint files)*
+
+- [ ] 04-01-PLAN.md — gray-matter install checkpoint + review/response/evaluation/decision-record zod schemas + tests (REVW-01/02/03, RCRD-01, RSLV-01)
+- [ ] 04-02-PLAN.md — format-contract template + per-vendor instruction-file seeding + Pitfall-1 ancestor-inheritance neutralization spike (REVW-01/02, D-37)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 04-03-PLAN.md — real per-phase prompts + validation-with-one-retry gate + integrator gate branch + manifest kinds + fixture extension (REVW-01/02/04, D-38)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 04-04-PLAN.md — bounded convergence sub-machine + convergenceCap + integrator-only merge with per-addition verdicts (REVW-03/04/05, RSLV-01, D-40/41/44)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 04-05-PLAN.md — decision-record writer + full 3-agent hermetic e2e (success #1) + true 3-vendor LIVE human-verify checkpoint (RCRD-01, RSLV-01, D-45/46/47/48)
 
 ### Phase 5: Hardening — Resume, Gating, Majority, Guards
 
@@ -150,5 +168,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
 | 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
 | 3. Protocol Engine + Independence Enforcement | 3/3 | Complete   | 2026-06-05 |
-| 4. First End-to-End Run | 0/TBD | Not started | - |
+| 4. First End-to-End Run | 0/5 | Not started | - |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |
