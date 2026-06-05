@@ -27,6 +27,15 @@ import { type ConvergenceResult, runConvergence } from "./converge.js";
 import { writeDecisionRecord } from "./decision-record.js";
 import { readAgentFrontmatter } from "./frontmatter.js";
 import { expectedParticipantCount, requiredArtifactsExist } from "./gate.js";
+import {
+  arbitrationLedgerEntry,
+  type GateAction,
+  injectFeedback,
+  runArbitration,
+  runGate,
+  writeGateFeedback,
+  writeHumanRuling,
+} from "./gating.js";
 import { PHASES, type Phase } from "./phases.js";
 
 /** Per-vendor transient-vs-fatal classifier for the retry seam (mirrors cli.ts CLASSIFY). */
@@ -35,6 +44,28 @@ const CLASSIFY: Record<AgentEntry["vendor"], Classify> = {
   codex: classifyCodex,
   gemini: classifyGemini,
 };
+
+/**
+ * The injectable prompt seam (D-53): production wires `node:readline/promises`; tests inject a stub
+ * that returns canned answers, so every gated path is provable without a real TTY. A single
+ * `(question) => Promise<string>` shape keeps the seam minimal.
+ */
+export type Ask = (question: string) => Promise<string>;
+
+/**
+ * Per-run gating options (PROT-05 / D-50/D-51/D-52/D-53). Threaded from `mar run`'s resolved mode
+ * into the machine context. In `autonomous` mode NONE of this fires — the run behaves exactly as it
+ * did before gating existed (no prompts, no pauses). In `gated` mode the engine pauses at each phase
+ * boundary (blocking prompt) OR, when `pauseAndExit` is set, writes `paused-awaiting-approval` and
+ * exits at the first boundary (continuation is `mar resume`, D-55).
+ */
+export interface GatingOptions {
+  mode: "autonomous" | "gated";
+  /** D-50 pause-and-exit: at the FIRST gated boundary write the paused status and return 0. */
+  pauseAndExit: boolean;
+  /** The prompt seam (D-53). Absent in autonomous mode; required for any gated interaction. */
+  ask?: Ask;
+}
 
 /** Shared input every actor/guard reads from the machine context. */
 export interface ProtocolInput {
@@ -48,6 +79,11 @@ export interface ProtocolInput {
    * and `expectedParticipantCount` recomputes from it (Pitfall 10).
    */
   roster?: AgentEntry[];
+  /**
+   * Per-run gating (PROT-05). Omitted (or `mode:"autonomous"`) → the unattended path with no
+   * prompts/pauses. In `gated` mode the engine pauses at each phase boundary via `gating.ask`.
+   */
+  gating?: GatingOptions;
 }
 
 /** A roster agent that failed its turn in a phase, with the reason for the audit log. */
@@ -79,6 +115,7 @@ export async function runPhase(
   phase: Phase,
   roster: AgentEntry[],
   input: ProtocolInput,
+  feedback?: string,
 ): Promise<PhaseResult> {
   const { runDir, config, inputPath } = input;
   const timeoutMs = config.defaults.timeoutMs;
@@ -124,8 +161,13 @@ export async function runPhase(
       const seq = seqFor(index);
       const adapter = makeAdapter(entry.vendor, entry.bin, entry.model);
       // Thin per-phase prompt (D-37): references the seeded instruction file, carries NO format
-      // contract. The format vocabulary lives solely in work/<agent>/<vendor-file> (04-02).
-      const basePrompt = phase.prompt({ inputPath, phaseName: phase.name });
+      // contract. The format vocabulary lives solely in work/<agent>/<vendor-file> (04-02). A gated
+      // feedback note (D-51), when present, is prepended as a clearly-attributed steering block for
+      // THIS phase only (the caller threads it for exactly one phase, then clears it) — the thin
+      // prompt below the note is unchanged, so the format contract still lives only in the seed.
+      const basePrompt = feedback
+        ? injectFeedback(phase.prompt({ inputPath, phaseName: phase.name }), feedback)
+        : phase.prompt({ inputPath, phaseName: phase.name });
       const promptRef = `phase:${phase.name}`;
       // PROT-04: only the draft phase runs in an isolated per-agent cwd. The scoped draft artifact
       // is also WRITTEN into that per-agent dir (`work/<agent>/`), so a peer can never read it from
@@ -362,6 +404,7 @@ async function runPhaseGated(
   roster: AgentEntry[],
   input: ProtocolInput,
   designatedIntegrator?: AgentEntry,
+  feedback?: string,
 ): Promise<PhaseOutcome> {
   // REVW-04: the integration phase fans out over ONLY the designated integrator, not the surviving
   // roster. Every other phase fans out over all survivors. The gate's expectedParticipantCount
@@ -371,7 +414,7 @@ async function runPhaseGated(
     phase.participants === "integrator"
       ? [designateIntegrator(roster, designatedIntegrator)]
       : roster;
-  const { writtenPaths, ok, failed } = await runPhase(phase, fanoutRoster, input);
+  const { writtenPaths, ok, failed } = await runPhase(phase, fanoutRoster, input, feedback);
 
   // A failure is a timeout iff EVERY failing agent timed out (the per-agent reason is the literal
   // "timeout" string set in runPhase). A mixed batch is reported as a generic failure — only an
@@ -457,6 +500,12 @@ interface ProtocolContext {
    * runs with the fallback base. The 04-05 decision-record writer reads concessions/openDecision.
    */
   convergence?: ConvergenceResult;
+  /**
+   * A human gate feedback note (D-51) captured at the PREVIOUS boundary, to be injected into the NEXT
+   * phase's prompt ONLY. The phase actor reads it; the phase's `onDone` survivors action CLEARS it so
+   * it never leaks past one phase (provenance stays clean — steering, not artifact editing).
+   */
+  feedback?: string;
 }
 
 /** A phase actor resolves with the surviving roster (continue) or a structured failure (fail). */
@@ -475,6 +524,86 @@ function failureFromError(prefix: string, error: unknown): PhaseFailure {
 }
 
 /**
+ * What the phase-boundary gate actor resolves with (PROT-05). `approve` continues; `abort` stops the
+ * run; `pause` writes `paused-awaiting-approval` + exits 0 (D-50 pause-and-exit); `feedback` carries a
+ * human steering note injected into the NEXT phase's prompt only (D-51).
+ */
+type GateActorOutcome =
+  | { kind: "approve" }
+  | { kind: "abort" }
+  | { kind: "pause" }
+  | { kind: "feedback"; note: string };
+
+/** The gate actor's resolved event (the onDone payload). */
+type GateEvent = { output: GateActorOutcome };
+
+/**
+ * Run the phase-boundary gate (D-50/D-51). In AUTONOMOUS mode (or with no gating) this is a no-op:
+ * resolve `approve` immediately, no prompt — the autonomous path is unchanged. In GATED mode with
+ * `pauseAndExit` set, resolve `pause` at the FIRST boundary so the machine reaches `paused` and the
+ * driver writes `paused-awaiting-approval` + exits 0. Otherwise run the blocking prompt via the
+ * injected `ask()` seam and translate the human's approve/abort/feedback into the actor outcome; a
+ * feedback note is persisted with attribution (auditable) AND returned so the NEXT phase's prompt
+ * carries it once. A gated run with no `ask` seam is a programming error → fail closed.
+ */
+async function runGateBoundary(
+  completedPhase: string,
+  nextPhase: string,
+  input: ProtocolInput,
+): Promise<GateActorOutcome> {
+  const gating = input.gating;
+  if (gating?.mode !== "gated") return { kind: "approve" };
+  if (gating.pauseAndExit) return { kind: "pause" };
+  if (!gating.ask) {
+    throw new Error("gated mode requires an ask() seam but none was provided");
+  }
+  const action: GateAction = await runGate(gating.ask, completedPhase, nextPhase);
+  if (action.kind === "approve") return { kind: "approve" };
+  if (action.kind === "abort") return { kind: "abort" };
+  // feedback: persist with attribution (D-51 / T-05-14) and thread into the next phase's prompt only.
+  await writeGateFeedback(input.runDir, nextPhase, action.note);
+  return { kind: "feedback", note: action.note };
+}
+
+/**
+ * Gated arbitration of an escalated convergence (RSLV-03 / D-52). No-op unless GATED AND the
+ * convergence escalated (resolver unset / status escalated) — in every other case the result passes
+ * through unchanged (autonomous escalation stays a logged open decision, D-42; an agreed/majority
+ * result needs no human). When it fires it presents each agent's final position + cited evidence,
+ * lets the human pick a side or write a ruling, records the ruling as a `resolver:"human"` resolved
+ * decision on disk, and returns an updated result (resolver:"human", arbitrated base, integrator
+ * recomputed from that base).
+ */
+async function runArbitrationBoundary(
+  input: ProtocolInput,
+  convergence?: ConvergenceResult,
+): Promise<ConvergenceResult> {
+  if (!convergence) {
+    throw new Error("arbitration boundary reached with no convergence result");
+  }
+  const gating = input.gating;
+  if (gating?.mode !== "gated" || convergence.status !== "escalated") {
+    return convergence; // autonomous, or already resolved → no human ruling.
+  }
+  if (!gating.ask) {
+    throw new Error("gated arbitration requires an ask() seam but none was provided");
+  }
+  const outcome = await runArbitration(gating.ask, input.runDir, convergence);
+  const entry = arbitrationLedgerEntry(convergence, outcome);
+  await writeHumanRuling(input.runDir, entry);
+  // The arbitrated result is now resolved by a human: status `agreed`, resolver `human`, the chosen
+  // base + its author as integrator. The open decision is cleared (it was settled by the ruling).
+  return {
+    ...convergence,
+    base: outcome.base,
+    integrator: outcome.base,
+    status: "agreed",
+    resolver: "human",
+    openDecision: undefined,
+  };
+}
+
+/**
  * The 6-phase protocol as an XState v5 machine. Each phase is a state that invokes a `fromPromise`
  * actor running {@link runPhaseGated} over the LIVE roster; the actor resolves with the surviving
  * roster (continue) or a structured {@link PhaseFailure} (fail). A guard advances only on a
@@ -490,8 +619,16 @@ function failureFromError(prefix: string, error: unknown): PhaseFailure {
 function buildMachine(resumePhase?: Phase["name"]) {
   const phaseActor = fromPromise<
     PhaseOutcome,
-    { phase: Phase; roster: AgentEntry[]; input: ProtocolInput; integrator?: AgentEntry }
-  >(({ input }) => runPhaseGated(input.phase, input.roster, input.input, input.integrator));
+    {
+      phase: Phase;
+      roster: AgentEntry[];
+      input: ProtocolInput;
+      integrator?: AgentEntry;
+      feedback?: string;
+    }
+  >(({ input }) =>
+    runPhaseGated(input.phase, input.roster, input.input, input.integrator, input.feedback),
+  );
   const promoteActor = fromPromise<void, { roster: AgentEntry[]; input: ProtocolInput }>(
     ({ input }) =>
       promoteDrafts(
@@ -507,14 +644,41 @@ function buildMachine(resumePhase?: Phase["name"]) {
     { roster: AgentEntry[]; input: ProtocolInput }
   >(({ input }) => runConvergence(input.roster, input.input));
 
+  // The phase-boundary GATE actor (PROT-05 / D-50/D-51). It is ALWAYS present in the machine but is a
+  // no-op in autonomous mode (resolves "approve" without prompting), so the autonomous path is byte-
+  // for-byte unchanged. In gated mode it either runs the blocking prompt (approve/abort/feedback) or,
+  // when `pauseAndExit` is set, signals "pause" so the machine reaches the `paused` final state and
+  // `runProtocol` writes `paused-awaiting-approval` + exits 0 (continuation is `mar resume`, D-55).
+  const gateActor = fromPromise<
+    GateActorOutcome,
+    { completedPhase: string; nextPhase: string; input: ProtocolInput }
+  >(({ input }) => runGateBoundary(input.completedPhase, input.nextPhase, input.input));
+
+  // The gated ARBITRATION actor (RSLV-03 / D-52). No-op unless gated AND convergence escalated. When
+  // it fires it presents each agent's final position + cited evidence, lets the human pick a side or
+  // write a ruling, records the ruling as a `resolver:"human"` resolved decision on disk, and returns
+  // an updated ConvergenceResult (resolver:"human", arbitrated base). Autonomous escalation is left as
+  // a logged open decision and never prompts (D-42 preserved).
+  const arbitrationActor = fromPromise<
+    ConvergenceResult,
+    { input: ProtocolInput; convergence?: ConvergenceResult }
+  >(({ input }) => runArbitrationBoundary(input.input, input.convergence));
+
   // Build the per-phase states programmatically so the 6-phase series stays in lock-step with
   // PHASES (single source of the phase order). The draft phase advances to a transient `promote`
   // state (PROT-04 boundary) before review; every other phase advances to the next phase or done.
+  // In BOTH modes each completed phase routes through a transient gate state (no-op in autonomous);
+  // this keeps the machine structure mode-independent and the gate decision a pure runtime concern.
   const states: Record<string, unknown> = {};
+  /** The transient gate state name interposed after `completedPhase` completes. */
+  const gateState = (completedPhase: string): string => `gate__${completedPhase}`;
   for (let i = 0; i < PHASES.length; i++) {
     const phase = PHASES[i];
     const isLast = i + 1 >= PHASES.length;
-    const next = phase.name === "draft" ? "promote" : isLast ? "done" : PHASES[i + 1].name;
+    // Route through the boundary gate first; on the LAST phase there is no further boundary → done.
+    // The gate state (no-op in autonomous) then routes to the phase's REAL next (draft→promote→review,
+    // others→next phase). The gate states are built in a second loop below.
+    const next = isLast ? "done" : gateState(phase.name);
 
     // The evaluation phase is the convergence loop (D-40), not a single gated fan-out. It invokes
     // the convergenceActor, which runs the bounded round loop and resolves the designated base +
@@ -524,6 +688,10 @@ function buildMachine(resumePhase?: Phase["name"]) {
     // with the fallback base — O-2 (a)). A thrown convergence actor (e.g. no parseable base) routes
     // to `failed` with the cause preserved.
     if (phase.name === "evaluation") {
+      // Convergence resolves the base/integrator, then routes through the gated-arbitration boundary
+      // (RSLV-03): `arbitrate` is a no-op unless gated AND escalated, in which case it records a
+      // `resolver:"human"` ruling and updates the convergence result. After arbitration the normal
+      // phase-boundary gate (gate__evaluation) runs before integration.
       states[phase.name] = {
         invoke: {
           src: "convergenceActor",
@@ -532,7 +700,7 @@ function buildMachine(resumePhase?: Phase["name"]) {
             input: context.input,
           }),
           onDone: {
-            target: next,
+            target: "arbitrate",
             actions: assign({
               convergence: ({ event }: { event: ConvergenceEvent }) => event.output,
               integrator: ({ context, event }) =>
@@ -565,6 +733,8 @@ function buildMachine(resumePhase?: Phase["name"]) {
           // REVW-04). Passed through for every phase; runPhaseGated ignores it unless the phase is
           // participants:"integrator".
           integrator: context.integrator,
+          // A pending gate feedback note (D-51), injected into THIS phase's prompt only.
+          feedback: context.feedback,
         }),
         onDone: [
           {
@@ -573,6 +743,8 @@ function buildMachine(resumePhase?: Phase["name"]) {
             actions: assign({
               roster: ({ event }: { event: PhaseEvent }) =>
                 (event.output as { survivors: AgentEntry[] }).survivors,
+              // Feedback steers exactly ONE phase: clear it once this phase has consumed it (D-51).
+              feedback: () => undefined,
             }),
           },
           {
@@ -616,12 +788,105 @@ function buildMachine(resumePhase?: Phase["name"]) {
     },
   };
 
+  // Transient gated-arbitration state (RSLV-03 / D-52). No-op in autonomous mode or when convergence
+  // agreed (the actor passes the result through unchanged). When gated AND escalated it records the
+  // human ruling (resolver:"human") and returns an updated convergence result; the integrator is
+  // recomputed from the (possibly arbitrated) base. Then it routes through evaluation's boundary gate.
+  states.arbitrate = {
+    invoke: {
+      src: "arbitrationActor",
+      input: ({ context }: { context: ProtocolContext }) => ({
+        input: context.input,
+        convergence: context.convergence,
+      }),
+      onDone: {
+        target: gateState("evaluation"),
+        actions: assign({
+          convergence: ({ event }: { event: ConvergenceEvent }) => event.output,
+          integrator: ({ context, event }) =>
+            resolveIntegrator(
+              context.roster,
+              (event as unknown as ConvergenceEvent).output.integrator,
+            ),
+        }),
+      },
+      onError: {
+        target: "failed",
+        actions: assign({
+          failure: ({ event }: { event: ErrorEvent }) =>
+            failureFromError("gated arbitration error", event.error),
+        }),
+      },
+    },
+  };
+
+  // The transient phase-boundary GATE states (D-50/D-51), one per non-last phase. The gate actor is a
+  // no-op in autonomous mode (resolves "approve"); in gated mode it runs the blocking prompt. The
+  // boundary AFTER a phase routes to that phase's REAL next on approve, to `paused` on pause-and-exit,
+  // to `failed` on abort, and (on feedback) assigns the note + continues to the real next.
+  for (let i = 0; i < PHASES.length; i++) {
+    const phase = PHASES[i];
+    const isLast = i + 1 >= PHASES.length;
+    if (isLast) continue; // last phase has no further boundary (→ done directly)
+    const realNext = phase.name === "draft" ? "promote" : PHASES[i + 1].name;
+    const nextPhaseName = phase.name === "draft" ? "review" : PHASES[i + 1].name;
+    states[gateState(phase.name)] = {
+      invoke: {
+        src: "gateActor",
+        input: ({ context }: { context: ProtocolContext }) => ({
+          completedPhase: phase.name,
+          nextPhase: nextPhaseName,
+          input: context.input,
+        }),
+        onDone: [
+          {
+            guard: ({ event }: { event: GateEvent }) => event.output.kind === "approve",
+            target: realNext,
+          },
+          {
+            guard: ({ event }: { event: GateEvent }) => event.output.kind === "pause",
+            target: "paused",
+          },
+          {
+            guard: ({ event }: { event: GateEvent }) => event.output.kind === "feedback",
+            target: realNext,
+            actions: assign({
+              feedback: ({ event }: { event: GateEvent }) =>
+                (event.output as { kind: "feedback"; note: string }).note,
+            }),
+          },
+          {
+            // abort (D-51): stop the run with a clear, human-attributed cause.
+            target: "failed",
+            actions: assign({
+              failure: (): PhaseFailure => ({
+                reason: `run aborted by human at the ${phase.name}→${nextPhaseName} gate`,
+                timedOut: false,
+              }),
+            }),
+          },
+        ],
+        onError: {
+          target: "failed",
+          actions: assign({
+            failure: ({ event }: { event: ErrorEvent }) =>
+              failureFromError(`gate after ${phase.name} error`, event.error),
+          }),
+        },
+      },
+    };
+  }
+
   states.done = { type: "final" };
   states.failed = { type: "final" };
+  // `paused` is a DISTINCT final state (D-50 pause-and-exit): the run halted at a boundary awaiting
+  // approval. {@link runProtocol} maps it to the `paused-awaiting-approval` manifest status + exit 0;
+  // `mar resume` continues it (D-55). Kept separate from `failed` so the cause is never misreported.
+  states.paused = { type: "final" };
 
   return setup({
     types: {} as { context: ProtocolContext; input: ProtocolInput },
-    actors: { phaseActor, promoteActor, convergenceActor },
+    actors: { phaseActor, promoteActor, convergenceActor, gateActor, arbitrationActor },
   }).createMachine({
     id: "protocol",
     // Resume RE-DERIVATION (D-14/D-54): a resumePhase name re-enters the SAME programmatic states at
@@ -650,12 +915,22 @@ export async function runProtocol(
   runDir: string,
   config: MarConfig,
   inputPath: string,
+  gating?: GatingOptions,
 ): Promise<number> {
   const machine = buildMachine();
-  const actor = createActor(machine, { input: { runDir, config, inputPath } });
+  const actor = createActor(machine, { input: { runDir, config, inputPath, gating } });
   actor.start();
   await toPromise(actor);
   const snapshot = actor.getSnapshot();
+  // D-50 pause-and-exit: the run halted at a gated boundary. Write the non-terminal
+  // `paused-awaiting-approval` status (05-02) and exit 0 — `mar resume` continues it (D-55). No
+  // decision record yet (the run is unfinished). This branch is unreachable in autonomous mode (the
+  // gate actor never returns `pause`).
+  if (snapshot.value === "paused") {
+    await setStatus(runDir, "paused-awaiting-approval");
+    process.stdout.write(`⏸ run ${runDir} paused awaiting approval — resume with: mar resume\n`);
+    return 0;
+  }
   if (snapshot.value === "done") {
     // O-2 (a): a run whose convergence ESCALATED (cap/deadlock → fallback base) completed the full
     // protocol and produced a merged artifact, but did so via an escalation rather than unanimous
@@ -830,7 +1105,11 @@ export async function revalidateForResume(
  * convergence restarts at round 1 (D-54). Seq monotonicity (nextSeq over manifest + on-disk names)
  * guarantees no phase ≤ N artifact is rewritten.
  */
-export async function resumeProtocol(runDir: string, config: MarConfig): Promise<number> {
+export async function resumeProtocol(
+  runDir: string,
+  config: MarConfig,
+  gating?: GatingOptions,
+): Promise<number> {
   const manifest = await readManifest(runDir); // (1) manifest integrity — fails closed if corrupt.
 
   // Refuse a terminal-done run: there is nothing left to resume.
@@ -869,13 +1148,21 @@ export async function resumeProtocol(runDir: string, config: MarConfig): Promise
   );
 
   // Re-derivation: rebuild the machine at the resume phase with the rehydrated roster (no snapshot).
+  // Gating is threaded through so a resumed run can itself be gated; a bare `mar resume` continues
+  // the run autonomously (gating omitted → no prompts), which is the expected "I already approved by
+  // resuming" behavior. A re-paused run again writes `paused-awaiting-approval`.
   const machine = buildMachine(resumePhase.name);
   const actor = createActor(machine, {
-    input: { runDir, config, inputPath, roster },
+    input: { runDir, config, inputPath, roster, gating },
   });
   actor.start();
   await toPromise(actor);
   const snapshot = actor.getSnapshot();
+  if (snapshot.value === "paused") {
+    await setStatus(runDir, "paused-awaiting-approval");
+    process.stdout.write(`⏸ run ${runDir} paused awaiting approval — resume with: mar resume\n`);
+    return 0;
+  }
   if (snapshot.value === "done") {
     const escalated = snapshot.context.convergence?.status === "escalated";
     await writeDecisionRecord(runDir, snapshot.context.convergence);
