@@ -46,7 +46,7 @@ created: 2026-06-04
 | 3-02-01 | 02 | 2 | PROT-03 | T-03-07 | gate blocks advance until EVERY required phase-N artifact isDone() (exists AND non-empty) | unit (pure gate) | `npx vitest run test/protocol-gate.test.ts` | ❌ W0 → test/protocol-gate.test.ts | ⬜ pending |
 | 3-02-01 | 02 | 2 | PROT-03 | T-03-07 | gate fails on a 0-byte / missing artifact | unit | `npx vitest run test/protocol-gate.test.ts -t "empty artifact"` | ❌ W0 → test/protocol-gate.test.ts | ⬜ pending |
 | 3-02-02 | 02 | 2 | PROT-01 / PROT-03 / PROT-04 | T-03-06 / T-03-07 / T-03-10 | engine drives all 6 phases (1 artifact/agent/kind), gates on artifacts-on-disk, scopes draft + promotes at boundary, allSettled fan-out; gated paths == written paths | integration (fake fixtures) | `npx vitest run test/protocol-engine.test.ts` | ❌ W0 → test/protocol-engine.test.ts | ⬜ pending |
-| 3-02-02 | 02 | 2 | PROT-01 | T-03-08 | run-start `assertReviewable` enforced for `mar run` (NOT exempt) — <2 distinct vendors refused | unit | `npx vitest run test/protocol-engine.test.ts -t "refuses <2 vendors"` | ❌ W0 → test/protocol-engine.test.ts | ⬜ pending |
+| 3-02-03 | 02 | 2 | PROT-01 | T-03-08 | run-start `assertReviewable` enforced for `mar run` (NOT exempt) — <2 distinct vendors refused; e2e lives on the CLI run path (assertReviewable in runRun), NOT the engine | integration (fake fixtures) | `npx vitest run test/protocol-run.e2e.test.ts -t "refuses <2 vendors"` | ✅ (created/extended 3-02-03; GREEN here) | ⬜ pending |
 | 3-02-03 | 02 | 2 | PROT-01 | T-03-09 | `mar run <input>` thin subcommand turns the Plan-01 e2e anchor GREEN; input bounded to MAX_PROMPT_FILE_BYTES | integration (fake fixtures) | `npx vitest run test/protocol-run.e2e.test.ts` | ✅ (created 3-01-03; GREEN here) | ⬜ pending |
 | 3-03-01 | 03 | 3 | PROT-04 (Success #4) | T-03-12 | A/B planted-error: independent drafts surface the error a shared-context control masks; hermetic, zero credits | integration (fake fixtures) | `npx vitest run test/planted-error.test.ts` | ❌ W0 → test/planted-error.test.ts | ⬜ pending |
 | 3-03-02 | 03 | 3 | PROT-01 / PROT-03 / PROT-04 | T-03-11 / T-03-13 | live human-verified `mar run` advances all 6 phases; work/<agent>/ lacked peer drafts; single-vendor refusal holds | manual (live checkpoint) | see Manual-Only Verifications | ✅ (live, no test file) | ⬜ pending |
@@ -63,9 +63,9 @@ Wave 0 = the failing test scaffolds Plans 01–03 create before/with their imple
 
 - [x] `test/adapter-cwd.test.ts` — PROT-04 `cwd` pass-through drift guard, all 3 adapters (created in Plan 01 Task 1)
 - [x] `test/scope-independence.test.ts` — PROT-04 scoped-dir listing + promotion boundary (created in Plan 01 Task 2)
-- [x] `test/protocol-run.e2e.test.ts` — PROT-01 RED e2e anchor: `mar run` 6-phase advance (created in Plan 01 Task 3; turned GREEN in Plan 02 Task 3)
+- [x] `test/protocol-run.e2e.test.ts` — PROT-01 RED e2e anchor: `mar run` 6-phase advance (created in Plan 01 Task 3; turned GREEN in Plan 02 Task 3) + a "refuses <2 vendors" e2e assertion added in Plan 02 Task 3 (single-vendor config -> non-zero, >=2-distinct-vendor stderr, no run started)
 - [x] `test/protocol-gate.test.ts` — PROT-03 pure gate incl. empty/missing artifact (created in Plan 02 Task 1)
-- [x] `test/protocol-engine.test.ts` — PROT-01/03/04 6-phase engine + ≥2-vendor gate (created in Plan 02 Task 2)
+- [x] `test/protocol-engine.test.ts` — PROT-01/03/04 6-phase engine + short-write guard via expectedParticipantCount (created in Plan 02 Task 2); the ≥2-vendor refusal is an e2e assertion in `test/protocol-run.e2e.test.ts` (Plan 02 Task 3), NOT the engine test
 - [x] `test/planted-error.test.ts` — Success-criterion #4 A/B catch test (created in Plan 03 Task 1)
 - [x] Fixture extension: `--emit <kind>` mode in `test/fixtures/fake-{claude,codex,gemini}.mjs` so a multi-phase run yields distinct per-phase artifacts (Plan 01 Task 3); planted-error fixture mode (Plan 03 Task 1)
 - [x] Framework install: none — vitest ^4 already present.
