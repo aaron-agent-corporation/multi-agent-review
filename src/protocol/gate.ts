@@ -46,12 +46,11 @@ export function expectedPhaseArtifacts(
  * engine guard compares `writtenPaths.length` against this so a failed agent (fewer written paths
  * than expected) fails the gate.
  *
- * In Phase 3 every phase is participants==="all", so the count is unconditionally roster.length.
- * The "all" branch is explicit, leaving room for a future non-"all" count branch (e.g. a single
- * integrator in Phase 4) without touching the live gate.
+ * An "all"-participant phase expects every surviving agent to write (roster.length). The
+ * "integrator" phase (integration, REVW-04) expects EXACTLY ONE writer — the designated integrator
+ * — so a redundant merge by a non-integrator (or a missing merge) fails the gate.
  */
 export function expectedParticipantCount(phase: Phase, roster: AgentEntry[]): number {
-  if (phase.participants === "all") return roster.length;
-  // No non-"all" mode exists in Phase 3; this is the future branch point.
+  if (phase.participants === "integrator") return 1; // REVW-04: single integrator writer
   return roster.length;
 }
