@@ -27,6 +27,9 @@ for you.
   requests approval fails validation and is dropped.
 - Do NOT wrap the artifact in commentary about writing, staging, or permissions. Your
   response must BEGIN with the artifact's opening `---` frontmatter delimiter.
+- In YAML frontmatter, wrap EVERY string value in double quotes — especially `question`,
+  `reason`, `refinement`, and `evidence` values, which often contain colons. An unquoted
+  colon inside a value breaks the YAML parser and fails your turn.
 
 ## REVIEW artifacts
 

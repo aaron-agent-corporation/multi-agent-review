@@ -189,8 +189,36 @@ export async function runPhase(
       // structured frontmatter. Parsing the agent text directly is the read that validates the
       // attacker-influenceable content (T-04-06). The raw turn JSON + wrapped .md are still on disk.
       if (phase.validate) {
-        const parseFront = (text: string): unknown => matter(text).data;
-        let result = phase.validate(parseFront(attempt.text));
+        // Tolerant reader (live-run hardening, 04-05 checkpoint): models — claude especially —
+        // sometimes emit preamble prose before the artifact despite the contract's output-channel
+        // rule. gray-matter only recognizes frontmatter at position 0, so when the direct parse
+        // yields no data we fall back to the FIRST `---` delimiter line and parse from there.
+        // Schema validation stays strict (fail-closed, D-38) — leniency applies only to WHERE the
+        // frontmatter is found, never to its shape.
+        const parseFront = (text: string): unknown => {
+          const direct = matter(text).data;
+          if (direct && Object.keys(direct).length > 0) return direct;
+          const delim = text.match(/^---\s*$/m);
+          if (delim?.index !== undefined && delim.index > 0) {
+            return matter(text.slice(delim.index)).data;
+          }
+          return direct;
+        };
+        // YAML parse exceptions (e.g. an unquoted colon inside a string value) must feed the SAME
+        // one-retry path as schema misses — previously they threw past the gate and the turn died
+        // with no feedback (observed live: gemini-1, run 20260605-MYPrO2).
+        const safeValidate = (text: string): { ok: true } | { ok: false; errors: string } => {
+          try {
+            return phase.validate!(parseFront(text));
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return {
+              ok: false,
+              errors: `YAML parse error in frontmatter: ${msg}\nQuote every string value that contains a colon, e.g. question: "How does X: Y work?"`,
+            };
+          }
+        };
+        let result = safeValidate(attempt.text);
         if (!result.ok) {
           process.stdout.write(`  ${entry.name} ↻ revalidating (validation errors fed back)\n`);
           const retryPrompt = `${basePrompt}\n\n## Validation errors to fix\n${result.errors}`;
@@ -201,7 +229,7 @@ export async function runPhase(
             return { entry, failure: reattempt.reason };
           }
           attempt = reattempt;
-          result = phase.validate(parseFront(attempt.text));
+          result = safeValidate(attempt.text);
           if (!result.ok) {
             const secs = (attempt.durationMs / 1000).toFixed(1);
             process.stdout.write(`  ${entry.name} ✗  ${secs}s  (validation-failed)\n`);
