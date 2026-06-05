@@ -140,9 +140,7 @@ function hintFor(vendor: AgentEntry["vendor"], stage: "install" | "probe"): stri
  * `--version` and exit non-zero — so the two call sites can never disagree again. `version` is the
  * extracted semver ("unknown" when the stdout has no `\d+.\d+.\d+` token).
  */
-export async function probeVersion(
-  bin: string,
-): Promise<{ installed: boolean; version: string }> {
+export async function probeVersion(bin: string): Promise<{ installed: boolean; version: string }> {
   try {
     const { cmd, preArgs } = splitBin(bin);
     const r = await execa(cmd, [...preArgs, "--version"], { reject: false, timeout: 10_000 });

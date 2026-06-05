@@ -83,7 +83,9 @@ describe("seq derivation (WR-03: monotonic over all turns)", () => {
   it("WR-05: nextSeq advances past an orphan .raw.json with no .md sibling", () => {
     // Manifest knows seq 1; on disk an orphan seq-2 .raw.json (no .md, no manifest entry) exists.
     // nextSeq must return 3 so the resumed turn never reuses seq 2 and clobbers the orphan raw.
-    expect(nextSeq(["001-claude-output.md"], ["001-claude-output.md", "002-claude-draft.raw.json"])).toBe(3);
+    expect(
+      nextSeq(["001-claude-output.md"], ["001-claude-output.md", "002-claude-draft.raw.json"]),
+    ).toBe(3);
   });
 });
 

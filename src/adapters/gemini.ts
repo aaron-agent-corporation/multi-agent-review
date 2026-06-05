@@ -46,7 +46,7 @@ function boundStderr(stderr: string): string {
  */
 function sanitizeGeminiError(message: string | undefined, stderr: string): string {
   const bounded = boundStderr(stderr);
-  return (message && message.trim()) || bounded || "gemini error";
+  return message?.trim() || bounded || "gemini error";
 }
 
 /**
