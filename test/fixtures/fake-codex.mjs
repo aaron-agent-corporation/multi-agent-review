@@ -15,25 +15,21 @@
 //                      marker "codex:<kind>" so a multi-phase run yields distinct per-phase
 //                      artifacts while preserving the verified NDJSON shape. (additive.)
 //   MAR_PLANTED_MODE=1 (env) → A/B INDEPENDENCE PROOF mode (test/planted-error.test.ts), codex twin
-//                      of the fake-claude logic. Env-activated (the injectable `bin` is split on the
-//                      first whitespace only, so extra bin flags can't survive). Output depends on
-//                      the phase (parsed from the prompt positional `phase: <name>`) AND on what the
-//                      agent can SEE on the filesystem:
-//                        • draft  → agent_message "VALUE=<V>", <V> = this agent's value from the JSON
-//                                   env map MAR_PLANTED_VALUES keyed by the scoped cwd basename
-//                                   (work/<agent>/).
-//                        • review → reads peer drafts promoted into ./shared/, collects VALUE=
-//                                   tokens, and emits "DISCREPANCY values=..." on disagreement or
-//                                   "AGREED value=..." when they match. Independence (a scoped draft
-//                                   phase) is what lets a divergent value reach shared/ and surface
-//                                   the discrepancy a shared-consensus control would mask.
-//                        • other  → "codex:<phase>".
-//                      Hermetic: reads only local files under cwd + env.
+//                      of fake-claude. Env-activated (the injectable `bin` is split on the first
+//                      whitespace only, so extra bin flags can't survive). The phase- and
+//                      filesystem-aware body is computed by the SHARED helper planted-shared.mjs
+//                      (plantedBody) so both fixtures stay in lock-step: draft emits "VALUE=<V>" and
+//                      records a peer-visibility probe (falsifiability); review reports
+//                      DISCREPANCY/AGREED from the promoted peer drafts in ./shared/;
+//                      MAR_SHARED_CONTEXT=1 (control) makes the draft genuinely share context off
+//                      disk. See planted-shared.mjs for the full mechanics. Hermetic: reads only
+//                      local files under cwd + env.
 //   --hang           → never exits (for timeout/kill tests)
 // The prompt is read from argv but is not required.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { plantedBody, plantedMode } from "./planted-shared.mjs";
 
 const args = process.argv.slice(2);
 
@@ -41,58 +37,6 @@ const args = process.argv.slice(2);
 function emitKind() {
   const i = args.indexOf("--emit");
   return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
-/** True when the A/B independence-proof mode is active (env-activated; see header). */
-function plantedMode() {
-  return process.env.MAR_PLANTED_MODE === "1";
-}
-
-/** This agent's privately-held draft value from MAR_PLANTED_VALUES keyed by scoped cwd basename. */
-function plantedValue() {
-  try {
-    const map = JSON.parse(process.env.MAR_PLANTED_VALUES ?? "{}");
-    return map[basename(process.cwd())] ?? "none";
-  } catch {
-    return "none";
-  }
-}
-
-/** The protocol phase, parsed from the engine's prompt positional `phase: <name>` in argv. */
-function phaseFromArgv() {
-  for (const a of args) {
-    const m = /phase:\s*(\w+)/.exec(a);
-    if (m) return m[1];
-  }
-  return undefined;
-}
-
-/** Locate the run's shared/ dir; probe ./shared then runs/<id>/shared (see fake-claude). */
-function sharedDir() {
-  const direct = join(process.cwd(), "shared");
-  if (existsSync(direct)) return direct;
-  const runsDir = join(process.cwd(), "runs");
-  if (existsSync(runsDir)) {
-    for (const id of readdirSync(runsDir)) {
-      const candidate = join(runsDir, id, "shared");
-      if (existsSync(candidate)) return candidate;
-    }
-  }
-  return undefined;
-}
-
-/** Distinct VALUE= tokens across every promoted peer draft under the run's shared/ (see fake-claude). */
-function peerValues() {
-  const dir = sharedDir();
-  if (!dir) return [];
-  const values = new Set();
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith("-draft.md")) continue;
-    const body = readFileSync(join(dir, name), "utf8");
-    const m = /VALUE=(\S+)/.exec(body);
-    if (m) values.add(m[1]);
-  }
-  return [...values];
 }
 
 /** Write one NDJSON event line to stdout. */
@@ -129,20 +73,10 @@ if (args.includes("--hang")) {
   // Never exit — lets a wall-clock timeout test kill us.
   setInterval(() => {}, 1e9);
 } else if (plantedMode()) {
-  // A/B independence proof: phase- and filesystem-aware output (see header).
-  const phase = phaseFromArgv();
-  if (phase === "draft") {
-    emitMessage(`VALUE=${plantedValue()}`);
-  } else if (phase === "review") {
-    const vals = peerValues();
-    emitMessage(
-      vals.length > 1
-        ? `DISCREPANCY values=${vals.join(",")}`
-        : `AGREED value=${vals[0] ?? "none"}`,
-    );
-  } else {
-    emitMessage(`codex:${phase ?? "unknown"}`);
-  }
+  // A/B independence proof: phase- and filesystem-aware output computed from disk (see
+  // planted-shared.mjs). Draft records the peer-visibility probe (falsifiability), control shares
+  // context off disk, review reports DISCREPANCY/AGREED from promoted peer drafts.
+  emitMessage(plantedBody("codex", args));
 } else if (emitKind() !== undefined) {
   // Per-phase marker mode: same verified NDJSON success sequence, agent_message tagged by kind.
   emit({ type: "thread.started", thread_id: "019e941a-ok" });
