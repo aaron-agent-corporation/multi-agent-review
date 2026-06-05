@@ -28,21 +28,21 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Review Machinery
 
-- [ ] **REVW-01**: Cross-reviews follow a structured format — numbered issues with severity (P1–P3) and a concrete question per issue — validated/normalized by the system
-- [ ] **REVW-02**: Each agent responds to reviews of its own draft with a structured verdict per issue: accept, reject with reason, or refine
-- [ ] **REVW-03**: An evaluation step selects a base document with cited, evidence-grounded justification
-- [ ] **REVW-04**: Exactly one agent is designated integrator after evaluation; only the integrator merges (no redundant merging)
-- [ ] **REVW-05**: The integrator reviews proposed additions before patching and may refine or reject those conflicting with resolved decisions
+- [x] **REVW-01**: Cross-reviews follow a structured format — numbered issues with severity (P1–P3) and a concrete question per issue — validated/normalized by the system
+- [x] **REVW-02**: Each agent responds to reviews of its own draft with a structured verdict per issue: accept, reject with reason, or refine
+- [x] **REVW-03**: An evaluation step selects a base document with cited, evidence-grounded justification
+- [x] **REVW-04**: Exactly one agent is designated integrator after evaluation; only the integrator merges (no redundant merging)
+- [x] **REVW-05**: The integrator reviews proposed additions before patching and may refine or reject those conflicting with resolved decisions
 
 ### Disagreement Resolution
 
-- [ ] **RSLV-01**: Disagreements are resolved by tiered mechanism: evidence-grounded integrator judgment (default), with every resolution logged with rationale
+- [x] **RSLV-01**: Disagreements are resolved by tiered mechanism: evidence-grounded integrator judgment (default), with every resolution logged with rationale
 - [ ] **RSLV-02**: For discrete forks (base selection, accept/reject), agents' positions are collected as a majority signal (3+ vendors) to inform or break ties
 - [ ] **RSLV-03**: Disagreements unresolvable on evidence and without clear majority are escalated as open decisions — pausing for human arbitration in gated mode, logged for review in autonomous mode
 
 ### Decision Record
 
-- [ ] **RCRD-01**: Every run produces a decision record: resolved decisions with rationale, open decisions, and artifact lineage
+- [x] **RCRD-01**: Every run produces a decision record: resolved decisions with rationale, open decisions, and artifact lineage
 - [ ] **RCRD-02**: The resolved-decisions record is fed to later phases as a guard so settled decisions are not re-litigated within the run
 
 ## v2 Requirements
@@ -97,13 +97,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROT-01 | Phase 3 | Complete |
 | PROT-03 | Phase 3 | Complete |
 | PROT-04 | Phase 3 | Complete |
-| REVW-01 | Phase 4 | Pending |
-| REVW-02 | Phase 4 | Pending |
-| REVW-03 | Phase 4 | Pending |
-| REVW-04 | Phase 4 | Pending |
-| REVW-05 | Phase 4 | Pending |
-| RSLV-01 | Phase 4 | Pending |
-| RCRD-01 | Phase 4 | Pending |
+| REVW-01 | Phase 4 | Complete |
+| REVW-02 | Phase 4 | Complete |
+| REVW-03 | Phase 4 | Complete |
+| REVW-04 | Phase 4 | Complete |
+| REVW-05 | Phase 4 | Complete |
+| RSLV-01 | Phase 4 | Complete |
+| RCRD-01 | Phase 4 | Complete |
 | PROT-05 | Phase 5 | Pending |
 | PROT-06 | Phase 5 | Pending |
 | RSLV-02 | Phase 5 | Pending |
