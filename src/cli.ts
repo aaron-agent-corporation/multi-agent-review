@@ -8,7 +8,9 @@ import { assertReviewable } from "./gates.js";
 import { detectVendors, writeStarterConfig } from "./init.js";
 import { logInvocation } from "./log/invocation.js";
 import { formatStatusLines, probeVersion, runPreflight } from "./preflight.js";
+import type { Ask, GatingOptions } from "./protocol/engine.js";
 import { resumeProtocol, runProtocol } from "./protocol/engine.js";
+import { defaultAsk } from "./protocol/gating.js";
 import {
   type Classify,
   classifyClaude,
@@ -29,6 +31,68 @@ const MAX_PROMPT_FILE_BYTES = 10 * 1024 * 1024;
 // Run-id charset MUST match `newRunId` (timestamp + nanoid alphabet); no path separators or
 // "..", so a supplied --run can never escape the runs/ tree (T-01-10 tampering mitigation).
 const RUN_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+// The injectable prompt seam (D-53). Production uses `defaultAsk` (node:readline/promises, no new
+// dependency); tests substitute a stub via {@link setAsk} so every gated/arbitration path is provable
+// without a real TTY. Mirrors the numEnv test-seam spirit (test-only behavior injection). The seam is
+// module-level so both the run-start mode prompt and the engine's gate prompts share ONE source.
+let askImpl: Ask = defaultAsk;
+/** Substitute the ask() seam (tests only). Returns the previous impl so a test can restore it. */
+export function setAsk(fn: Ask): Ask {
+  const prev = askImpl;
+  askImpl = fn;
+  return prev;
+}
+/** Restore the production ask() seam (tests only). */
+export function resetAsk(): void {
+  askImpl = defaultAsk;
+}
+
+/** Run-command flags resolved by commander for `mar run`. */
+interface RunOptions {
+  mode?: string;
+  gated?: boolean;
+  autonomous?: boolean;
+  pauseAndExit?: boolean;
+}
+
+/**
+ * Resolve the effective per-run gating mode (PROT-05 / D-53 / Pitfall 5). Precedence:
+ *   1. An explicit flag (`--mode`/`--gated`/`--autonomous`) WINS and skips the prompt — works in
+ *      both TTY and non-TTY contexts.
+ *   2. Else, if stdin IS a TTY, prompt once via the ask() seam to choose gated/autonomous.
+ *   3. Else (non-TTY, no flag) DEFAULT to the config's `mode` (itself defaulting to autonomous) and
+ *      NEVER prompt — a scripted/CI `mar run` must not hang (Pitfall 5 / T-05-15).
+ * `--pause-and-exit` is only meaningful with gated; it is ignored in autonomous mode.
+ * Returns the resolved {@link GatingOptions} carrying the ask() seam for the engine's gate prompts.
+ */
+async function resolveGating(
+  opts: RunOptions,
+  configMode: "autonomous" | "gated",
+): Promise<GatingOptions> {
+  let mode: "autonomous" | "gated" | undefined;
+  // Explicit flags (most specific first); `--mode` accepts the two literals.
+  if (opts.gated) mode = "gated";
+  else if (opts.autonomous) mode = "autonomous";
+  else if (opts.mode === "gated" || opts.mode === "autonomous") mode = opts.mode;
+
+  if (mode === undefined) {
+    if (process.stdin.isTTY) {
+      // Interactive run-start prompt (D-53). The ONLY prompt issued when no flag is set and stdin is
+      // a TTY; guarded so a non-TTY run never reaches here.
+      const answer = (await askImpl("execution mode? [autonomous]/gated > ")).trim().toLowerCase();
+      mode = answer === "gated" || answer === "g" ? "gated" : "autonomous";
+    } else {
+      // Non-TTY, no flag → the config default (autonomous unless the roster opted into gated). NEVER
+      // prompt here (Pitfall 5): a bare scripted `mar run` must complete unattended.
+      mode = configMode;
+    }
+  }
+
+  const pauseAndExit = mode === "gated" && opts.pauseAndExit === true;
+  // The ask() seam is threaded into gating ONLY for gated mode (autonomous never prompts).
+  return mode === "gated" ? { mode, pauseAndExit, ask: askImpl } : { mode, pauseAndExit: false };
+}
 
 interface InvokeOptions {
   agent: string;
@@ -324,7 +388,7 @@ async function runPreflightCmd(): Promise<number> {
  * Unlike `mar invoke`, `mar run` is NOT gate-exempt: it MUST pass assertReviewable (>=2 distinct
  * vendors, D-29) — single-vendor review is out of scope. It does NOT auto-run preflight (D-27).
  */
-async function runRun(input: string): Promise<number> {
+async function runRun(input: string, opts: RunOptions = {}): Promise<number> {
   // 1. Load the roster (clear missing/invalid errors → exit 2).
   let config: Awaited<ReturnType<typeof loadConfig>>;
   try {
@@ -361,12 +425,17 @@ async function runRun(input: string): Promise<number> {
     return 2;
   }
 
-  // 4. Create the run (status "running"), then delegate the entire protocol to the engine.
+  // 4. Resolve the per-run gating mode (PROT-05 / D-53): a flag wins; else a TTY prompt; else the
+  //    config default — a non-TTY run NEVER prompts (Pitfall 5). The resolved mode carries the ask()
+  //    seam for the engine's phase-boundary gate prompts.
+  const gating = await resolveGating(opts, config.defaults.mode);
+
+  // 5. Create the run (status "running"), then delegate the entire protocol to the engine.
   const runId = newRunId();
   const runDir = runDirFor(runId);
   // Record the input path so `mar resume` can re-derive the machine input from disk (D-54).
   await createRun({ runDir, runId, status: "running", inputPath: input });
-  return await runProtocol(runDir, config, input);
+  return await runProtocol(runDir, config, input, gating);
 }
 
 /**
@@ -489,8 +558,18 @@ export function buildProgram(): Command {
     .command("run")
     .description("Run the 6-phase review protocol on an input document")
     .argument("<input>", "path to the input document")
-    .action(async (input: string) => {
-      process.exitCode = await runRun(input);
+    .option(
+      "--mode <gated|autonomous>",
+      "execution mode (overrides the config + the run-start prompt)",
+    )
+    .option("--gated", "gated mode: pause at each phase boundary for approval (PROT-05)")
+    .option("--autonomous", "autonomous mode: run unattended with no pauses")
+    .option(
+      "--pause-and-exit",
+      "gated only: pause at the first boundary, exit 0, resume with `mar resume`",
+    )
+    .action(async (input: string, opts: RunOptions) => {
+      process.exitCode = await runRun(input, opts);
     });
 
   program
