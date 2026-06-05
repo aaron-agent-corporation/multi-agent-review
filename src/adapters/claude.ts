@@ -4,7 +4,7 @@ import type { AgentAdapter, TurnRequest } from "./adapter.js";
 // Vendor-agnostic adapter helpers now live in common.ts so codex/gemini import rather than
 // copy-paste them (Phase 2). splitBin is re-exported below for back-compat — existing callers
 // (and claude-adapter.test.ts) import it from this module.
-import { redactArgv, safeJsonParse, splitBin } from "./common.js";
+import { redactArgvAt, safeJsonParse, splitBin } from "./common.js";
 
 // Re-export splitBin so existing imports of `../adapters/claude.js` keep working unchanged.
 export { splitBin };
@@ -42,7 +42,8 @@ export function makeClaudeAdapter(bin = "claude", model?: string): AgentAdapter 
       const argv = [...preArgs, ...buildArgv(req.promptText, model)];
       // WR-04: the redacted argv (prompt body → placeholder) is the SAME array we spawn, so the
       // audit log and the spawn share one source of truth and can never silently diverge.
-      const redactedCommand = redactArgv(argv, req.promptText);
+      // WR-02: redact by POSITION — the prompt is the slot after `-p`, i.e. preArgs + 1.
+      const redactedCommand = redactArgvAt(argv, preArgs.length + 1);
       const result = await execa(cmd, argv, {
         timeout: req.timeoutMs, // wall-clock ms; subprocess terminated on overrun (D-17)
         killSignal: "SIGTERM",

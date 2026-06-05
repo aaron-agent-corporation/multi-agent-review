@@ -59,6 +59,15 @@ describe("makeClaudeAdapter (against fake-claude fixture)", () => {
     expect(r.redactedCommand).toEqual(["-p", "<prompt>", "--output-format", "json"]);
   });
 
+  it("WR-02: a prompt that collides with a flag VALUE redacts only the prompt slot (positional)", async () => {
+    // The prompt is literally "json", which also appears as the value of --output-format. Value-based
+    // redaction would rewrite BOTH to <prompt>, corrupting the recorded flag set; positional
+    // redaction touches only index 1 (the slot after -p), leaving --output-format json intact.
+    const adapter = makeClaudeAdapter(FIXTURE);
+    const r = await adapter.invoke(req("json"));
+    expect(r.redactedCommand).toEqual(["-p", "<prompt>", "--output-format", "json"]);
+  });
+
   it("--fail-auth → ok:false despite misleading subtype 'success' (exit 1 AND is_error)", async () => {
     const adapter = makeClaudeAdapter(FIXTURE);
     const r = await adapter.invoke(req("--fail-auth"));

@@ -1,7 +1,7 @@
 import { execa } from "execa";
 import { CodexEvent, type TurnResult } from "../schema/turn.js";
 import type { AgentAdapter, TurnRequest } from "./adapter.js";
-import { redactArgv, safeJsonParse, splitBin } from "./common.js";
+import { redactArgvAt, safeJsonParse, splitBin } from "./common.js";
 
 /**
  * Build the exact, pinned codex argv for headless NDJSON invocation (codex-cli 0.128.0,
@@ -43,7 +43,8 @@ export function makeCodexAdapter(bin = "codex", model?: string): AgentAdapter {
       const { cmd, preArgs } = splitBin(bin);
       const argv = [...preArgs, ...buildArgv(req.promptText, model)];
       // WR-04: the redacted argv (prompt body → placeholder) is the SAME array we spawn.
-      const redactedCommand = redactArgv(argv, req.promptText);
+      // WR-02: redact by POSITION — codex puts the prompt as the TRAILING positional (last slot).
+      const redactedCommand = redactArgvAt(argv, argv.length - 1);
       const result = await execa(cmd, argv, {
         timeout: req.timeoutMs, // wall-clock ms; subprocess terminated on overrun (D-17)
         killSignal: "SIGTERM",

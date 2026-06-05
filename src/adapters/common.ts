@@ -38,11 +38,26 @@ export function safeJsonParse(text: string): unknown {
 }
 
 /**
- * Build the redacted argv (real flags, prompt body replaced) from the spawned argv. Matches by
- * VALUE, so it works regardless of where the prompt sits in the argv (claude `-p <prompt> ...`,
- * codex trailing positional, gemini `-p <prompt> ...`). The redacted array is the SAME array the
- * adapter spawned with only the prompt slot swapped — one source of truth with the spawn.
+ * Build the redacted argv by POSITION (WR-02). Only the single slot at `promptIndex` is replaced
+ * with {@link PROMPT_PLACEHOLDER}; every other element is copied verbatim. The prompt index is
+ * known at build time per adapter (claude/gemini: the slot after `-p`; codex: the trailing
+ * positional), so the redaction is exact regardless of the prompt's content.
+ *
+ * This replaces the older value-based redaction, which rewrote EVERY argv element equal to the
+ * prompt text. A prompt that happened to equal a pinned flag value (e.g. `--prompt json`,
+ * `--prompt read-only`, or a prompt equal to the configured model name) would corrupt the
+ * recorded `redactedCommand`, defeating the "single source of truth with the spawn" guarantee
+ * (it never leaked the prompt, but it did misreport the actual flag set in the audit log).
+ *
+ * The returned array is the SAME array the adapter spawned with only the prompt slot swapped.
  */
-export function redactArgv(argv: string[], promptText: string): string[] {
-  return argv.map((a) => (a === promptText ? PROMPT_PLACEHOLDER : a));
+export function redactArgvAt(argv: string[], promptIndex: number): string[] {
+  if (promptIndex < 0 || promptIndex >= argv.length) {
+    // Defensive: an out-of-range index means the caller miscomputed the slot. Never spawn the
+    // prompt unredacted into the audit log — fail loudly instead of silently logging it.
+    throw new Error(
+      `redactArgvAt: promptIndex ${promptIndex} out of range for argv of length ${argv.length}`,
+    );
+  }
+  return argv.map((a, i) => (i === promptIndex ? PROMPT_PLACEHOLDER : a));
 }
