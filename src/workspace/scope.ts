@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import fsExtra from "fs-extra";
+import { isDone } from "./artifacts.js";
 import { artifactName } from "./layout.js";
 
 const { ensureDir, copy } = fsExtra;
@@ -59,6 +60,16 @@ export async function promoteDrafts(runDir: string, agents: string[]): Promise<v
   for (const agent of agents) {
     assertSafeAgent(agent);
     const name = draftFileName(agent);
-    await copy(join(runDir, "work", agent, name), join(sharedDir, name));
+    const src = join(runDir, "work", agent, name);
+    // WR-02: verify the promotion SOURCE before copy. The gate checks the written abs paths under
+    // work/<agent>/, but promotion re-derives the source independently, so a survivor whose draft
+    // is absent/renamed/empty after the gate would make fsExtra.copy reject with an opaque ENOENT
+    // that routes to `failed` with no audit reason. A descriptive error naming the agent + path is
+    // threaded into the manifest failureReason (via the engine's failureFromError path, CR-01) so
+    // the operator can see promotion was the cause.
+    if (!isDone(src)) {
+      throw new Error(`promoteDrafts: missing or empty draft for agent "${agent}" at ${src}`);
+    }
+    await copy(src, join(sharedDir, name));
   }
 }

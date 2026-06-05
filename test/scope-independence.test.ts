@@ -84,4 +84,22 @@ describe("promoteDrafts is the ONLY writer to shared/ for drafts (boundary promo
     expect(existsSync(join(sharedDir, draftFileName("alice")))).toBe(true);
     expect(existsSync(join(sharedDir, draftFileName("bob")))).toBe(true);
   });
+
+  it("WR-02: a missing/empty promotion source throws a descriptive error naming the agent + path", async () => {
+    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath);
+    await scopedWorkdir(runDir, "bob", inputPath);
+    writeDraft(aliceDir, "alice", "alice draft");
+    // bob never wrote a draft → its promotion source is absent. The old code surfaced an opaque
+    // ENOENT from fsExtra.copy; the guard now throws a message naming the agent + source path so
+    // the engine can persist a meaningful failureReason.
+    await expect(promoteDrafts(runDir, ["alice", "bob"])).rejects.toThrow(/bob/);
+    await expect(promoteDrafts(runDir, ["alice", "bob"])).rejects.toThrow(/draft/i);
+  });
+
+  it("WR-02: an empty (0-byte) promotion source is treated as missing (isDone gate)", async () => {
+    const aliceDir = await scopedWorkdir(runDir, "alice", inputPath);
+    // 0-byte draft: exists but not "done".
+    writeFileSync(join(aliceDir, draftFileName("alice")), "", "utf8");
+    await expect(promoteDrafts(runDir, ["alice"])).rejects.toThrow(/alice/);
+  });
 });
