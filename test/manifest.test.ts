@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Manifest } from "../src/schema/manifest.js";
+import { Manifest, RESUMABLE_STATUSES, TERMINAL_DONE } from "../src/schema/manifest.js";
 import { isDone, writeArtifact } from "../src/workspace/artifacts.js";
 import {
   addArtifact,
@@ -74,6 +74,31 @@ describe("manifest (filesystem-as-truth)", () => {
     const m = await setStatus(rd, "completed");
     expect(m.status).toBe("completed");
     expect((await readManifest(rd)).status).toBe("completed");
+  });
+
+  it("setStatus round-trips the non-terminal paused-awaiting-approval status (Q7)", async () => {
+    const rd = join(work, "runs", "r-paused");
+    await createRun({ runDir: rd, runId: "r-paused", cliVersions: {} });
+    const m = await setStatus(rd, "paused-awaiting-approval");
+    expect(m.status).toBe("paused-awaiting-approval");
+    expect((await readManifest(rd)).status).toBe("paused-awaiting-approval");
+  });
+});
+
+describe("resumability source of truth (Q7, Pitfall 6)", () => {
+  it("RESUMABLE_STATUSES contains exactly the four resumable statuses", () => {
+    expect(new Set(RESUMABLE_STATUSES)).toEqual(
+      new Set(["running", "failed", "timeout", "paused-awaiting-approval"]),
+    );
+  });
+
+  it("RESUMABLE_STATUSES excludes the terminal-done statuses", () => {
+    expect(RESUMABLE_STATUSES).not.toContain("completed");
+    expect(RESUMABLE_STATUSES).not.toContain("escalated");
+  });
+
+  it("TERMINAL_DONE is exactly completed + escalated", () => {
+    expect(new Set(TERMINAL_DONE)).toEqual(new Set(["completed", "escalated"]));
   });
 
   it("WR-01: concurrent addArtifact calls do not lose updates (in-process serialization)", async () => {

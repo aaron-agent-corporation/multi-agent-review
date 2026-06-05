@@ -38,7 +38,18 @@ export const Manifest = z.object({
   // "escalated" is the O-2 fallback-base outcome: the run completed the protocol but converged via
   // an escalation rather than unanimous agreement. Additive (mirrors the optional droppedAgents
   // precedent) so prior manifests parse unchanged.
-  status: z.enum(["created", "running", "completed", "failed", "timeout", "escalated"]),
+  // "paused-awaiting-approval" is the NON-terminal gated-mode pause status (D-50/Q7): the run halted
+  // at a phase boundary awaiting human approval and is resumable. Additive in the same style — prior
+  // manifests (which never carry it) parse unchanged.
+  status: z.enum([
+    "created",
+    "running",
+    "completed",
+    "failed",
+    "timeout",
+    "escalated",
+    "paused-awaiting-approval",
+  ]),
   createdAt: z.string(), // ISO
   updatedAt: z.string(), // ISO
   cliVersions: z.record(z.string(), z.string()), // { claude: "2.1.162" }
@@ -55,3 +66,29 @@ export const Manifest = z.object({
 
 export type Manifest = z.infer<typeof Manifest>;
 export type ManifestStatus = Manifest["status"];
+
+/**
+ * The SINGLE explicit source of resumability (Q7, Pitfall 6). Terminal-vs-resumable is enforced
+ * nowhere else today; the `mar resume` command (05-04) is the first reader. Defining these sets once,
+ * here next to the enum, keeps the two notions from drifting and makes the filter testable.
+ *
+ * A status is RESUMABLE when the run can be re-derived from disk and driven forward: `running` (an
+ * interrupted in-flight run), `failed`/`timeout` (D-57: these ARE resumable — a re-run picks up the
+ * FULL roster), and `paused-awaiting-approval` (a gated-mode boundary pause). It is TERMINAL-done when
+ * the protocol finished: `completed` (unanimous) or `escalated` (O-2 fallback). `created` is neither —
+ * a run that never started has no phase to resume into.
+ *
+ * Typed as `readonly ManifestStatus[]` so adding or renaming an enum member that should belong here
+ * surfaces a compile error at the literal (the array entries are checked against `ManifestStatus`).
+ */
+export const RESUMABLE_STATUSES = [
+  "running",
+  "failed",
+  "timeout",
+  "paused-awaiting-approval",
+] as const satisfies readonly ManifestStatus[];
+
+export const TERMINAL_DONE = [
+  "completed",
+  "escalated",
+] as const satisfies readonly ManifestStatus[];
