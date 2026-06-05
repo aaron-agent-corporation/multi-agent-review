@@ -29,7 +29,10 @@ const fakeCodex = join(here, "fixtures", "fake-codex.mjs");
 const cliEntry = join(repoRoot, "src", "cli.ts");
 
 // The 6 protocol phases, in order. The engine writes one artifact per agent per phase.
-const PHASE_KINDS = ["draft", "review", "response", "evaluation", "integration", "validation"];
+// The evaluation phase is the bounded convergence loop (04-04): with MAR_EMIT_BASE pinned (the run
+// env below) every fixture proposes the SAME base with no open disagreements, so the loop AGREES on
+// round 1 → one evaluation round, written with the disambiguated kind `evaluation-r1`.
+const PHASE_KINDS = ["draft", "review", "response", "evaluation-r1", "integration", "validation"];
 
 let workdir: string;
 
@@ -65,7 +68,9 @@ it("mar run drives a 2-vendor roster through all 6 phases (RED anchor for Plan 0
   const result = await execa("npx", ["tsx", cliEntry, "run", inputPath], {
     cwd: workdir,
     reject: false,
-    env: { ...process.env },
+    // Pin the convergence base so the stock fixtures agree on round 1 (terminal status `completed`,
+    // not `escalated`); the cap/escalation paths are exercised in converge.test.ts.
+    env: { ...process.env, MAR_EMIT_BASE: "claude" },
   });
 
   // A full protocol run must succeed end-to-end.

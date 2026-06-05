@@ -14,7 +14,12 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const fakeClaude = join(here, "fixtures", "fake-claude.mjs");
 const fakeCodex = join(here, "fixtures", "fake-codex.mjs");
 
-const PHASE_KINDS = ["draft", "review", "response", "evaluation", "integration", "validation"];
+// The evaluation phase is now the bounded convergence loop (04-04): it writes per-ROUND evaluation
+// artifacts with a disambiguated kind (`evaluation-r<n>`), not a single `evaluation` kind. With
+// MAR_EMIT_BASE pinned (below) every fixture proposes the SAME base with no open disagreements, so
+// the loop AGREES on round 1 → exactly one evaluation round (kind `evaluation-r1`), mirroring the
+// pre-convergence single-evaluation artifact count.
+const PHASE_KINDS = ["draft", "review", "response", "evaluation-r1", "integration", "validation"];
 
 let workdir: string;
 let runDir: string;
@@ -23,7 +28,7 @@ let inputPath: string;
 function baseConfig(agents: MarConfig["agents"]): MarConfig {
   return {
     agents,
-    defaults: { timeoutMs: 30_000, retries: 0 },
+    defaults: { timeoutMs: 30_000, retries: 0, convergenceCap: 10 },
   } as MarConfig;
 }
 
@@ -34,10 +39,15 @@ beforeEach(async () => {
   writeFileSync(inputPath, "# document under review\n\nA proposal.\n", "utf8");
   // The engine's contract: the run is already created (the CLI does this before delegating).
   await createRun({ runDir, runId: "20260604-test01", status: "running" });
+  // Pin the convergence base so the stock fixtures all propose the SAME proposedBase and the loop
+  // agrees on round 1 (one evaluation round). Without this each fixture proposes its own author →
+  // the loop never agrees and runs to the cap, which is exercised separately in converge.test.ts.
+  process.env.MAR_EMIT_BASE = "claude";
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.MAR_EMIT_BASE;
   if (workdir) rmSync(workdir, { recursive: true, force: true });
 });
 
@@ -77,12 +87,18 @@ it("gates each phase on EXACTLY the paths the fan-out wrote (gated == written, s
 
   const exit = await runProtocol(runDir, config, inputPath);
   expect(exit).toBe(0);
-  expect(spy).toHaveBeenCalledTimes(6); // one gate check per phase
+  // One artifacts-gate check per GATED phase. The evaluation phase is now the convergence loop
+  // (04-04), which is governed by its own agreement guard (reads proposedBase from disk), NOT the
+  // requiredArtifactsExist artifacts gate — so 5 gated phases (draft/review/response/integration/
+  // validation), not 6.
+  const GATED_KINDS = ["draft", "review", "response", "integration", "validation"];
+  expect(spy).toHaveBeenCalledTimes(GATED_KINDS.length);
 
   const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
-  // Group manifest artifact ABSOLUTE paths by kind, in phase order.
-  for (let i = 0; i < PHASE_KINDS.length; i++) {
-    const kind = PHASE_KINDS[i];
+  // Group manifest artifact ABSOLUTE paths by GATED kind, in gate-call order: each gate call's path
+  // set must equal exactly the artifacts written for that phase (gated == written, source of truth).
+  for (let i = 0; i < GATED_KINDS.length; i++) {
+    const kind = GATED_KINDS[i];
     const writtenForPhase = manifest.artifacts
       .filter((a: { kind: string }) => a.kind === kind)
       .map((a: { path: string }) => join(runDir, a.path))

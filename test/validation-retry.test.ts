@@ -30,7 +30,7 @@ let runDir: string;
 let inputPath: string;
 
 function baseConfig(agents: MarConfig["agents"]): MarConfig {
-  return { agents, defaults: { timeoutMs: 30_000, retries: 0 } } as MarConfig;
+  return { agents, defaults: { timeoutMs: 30_000, retries: 0, convergenceCap: 10 } } as MarConfig;
 }
 
 beforeEach(async () => {
@@ -39,10 +39,15 @@ beforeEach(async () => {
   inputPath = join(workdir, "input.md");
   writeFileSync(inputPath, "# document under review\n\nA proposal.\n", "utf8");
   await createRun({ runDir, runId: "20260605-valretry", status: "running" });
+  // Pin the convergence base so the evaluation loop AGREES on round 1 (status `completed`, not
+  // `escalated`). These tests exercise the validation-retry gate, not convergence — without a pinned
+  // base the stock fixtures each propose their own author and the loop escalates to the cap.
+  process.env.MAR_EMIT_BASE = "claude";
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.MAR_EMIT_BASE;
   if (workdir) rmSync(workdir, { recursive: true, force: true });
 });
 
