@@ -8,7 +8,7 @@ import { assertReviewable } from "./gates.js";
 import { detectVendors, writeStarterConfig } from "./init.js";
 import { logInvocation } from "./log/invocation.js";
 import { formatStatusLines, probeVersion, runPreflight } from "./preflight.js";
-import { runProtocol } from "./protocol/engine.js";
+import { resumeProtocol, runProtocol } from "./protocol/engine.js";
 import {
   type Classify,
   classifyClaude,
@@ -20,6 +20,7 @@ import type { AgentEntry } from "./schema/config.js";
 import { writeArtifact } from "./workspace/artifacts.js";
 import { artifactPath, newRunId, nextSeq, runDir as runDirFor } from "./workspace/layout.js";
 import { addArtifact, createRun, readManifest, setStatus } from "./workspace/manifest.js";
+import { RESUMABLE_STATUSES, TERMINAL_DONE } from "./schema/manifest.js";
 
 // WR-05: cap a prompt FILE read at 10 MB, matching claude's stdin cap (claude 2.1.128+). A
 // value larger than this is treated as an error rather than silently streamed to the model.
@@ -368,6 +369,87 @@ async function runRun(input: string): Promise<number> {
   return await runProtocol(runDir, config, input);
 }
 
+/**
+ * `mar resume <run-id>` / `mar resume --last` — continue an interrupted/failed/paused run from its
+ * last completed phase (PROT-06, D-55). THIN controller (02-05 thin-CLI rule): it loads the roster,
+ * resolves the target run (explicit id or the most-recent resumable run), refuses a terminal-done
+ * run, then delegates ALL phase derivation, D-56 re-validation, preflight, and the terminal status to
+ * {@link resumeProtocol}. No phase/re-validation logic lives here.
+ *
+ * Exactly one of `<run-id>` / `--last` must be supplied (usage error otherwise). `<run-id>` is
+ * validated against RUN_ID_RE (the path-traversal guard, T-05-10) and the run dir must exist.
+ */
+async function runResume(opts: { runId?: string; last?: boolean }): Promise<number> {
+  // 1. Load the roster (clear missing/invalid errors → exit 2).
+  let config: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    config = await loadConfig();
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+
+  // 2. Require EXACTLY one selector.
+  if (opts.last && opts.runId) {
+    process.stderr.write("error: pass either <run-id> or --last, not both\n");
+    return 2;
+  }
+  if (!opts.last && !opts.runId) {
+    process.stderr.write("error: specify a <run-id> or --last\n");
+    return 2;
+  }
+
+  // 3. Resolve the target run dir.
+  let runDir: string;
+  if (opts.last) {
+    // Enumerate runs/, readManifest each, filter to RESUMABLE_STATUSES, pick most-recent by updatedAt.
+    const runsRoot = "runs";
+    if (!existsSync(runsRoot)) {
+      process.stderr.write("error: no runs/ directory — nothing to resume\n");
+      return 2;
+    }
+    let best: { dir: string; updatedAt: string } | undefined;
+    for (const id of readdirSync(runsRoot)) {
+      if (!RUN_ID_RE.test(id)) continue;
+      const dir = runDirFor(id);
+      try {
+        const m = await readManifest(dir);
+        if (!(RESUMABLE_STATUSES as readonly string[]).includes(m.status)) continue;
+        if (!best || m.updatedAt > best.updatedAt) best = { dir, updatedAt: m.updatedAt };
+      } catch {
+        // A run dir without a parseable manifest is skipped (not resumable).
+      }
+    }
+    if (!best) {
+      process.stderr.write("error: no resumable run found (--last)\n");
+      return 2;
+    }
+    runDir = best.dir;
+  } else {
+    const runId = opts.runId as string;
+    if (!RUN_ID_RE.test(runId)) {
+      process.stderr.write(`error: invalid run id "${runId}"\n`);
+      return 2;
+    }
+    runDir = runDirFor(runId);
+    if (!existsSync(runDir)) {
+      process.stderr.write(`error: run "${runId}" does not exist\n`);
+      return 2;
+    }
+  }
+
+  // 4. Refuse a terminal-done run up front with a clear message (resumeProtocol also fails closed).
+  const manifest = await readManifest(runDir);
+  if ((TERMINAL_DONE as readonly string[]).includes(manifest.status)) {
+    process.stderr.write(`error: run already ${manifest.status}; nothing to resume\n`);
+    return 2;
+  }
+
+  // 5. Delegate the entire resume (phase derivation + D-56 re-validation + preflight + terminal
+  //    status) to the engine and return its exit code.
+  return await resumeProtocol(runDir, config);
+}
+
 export function buildProgram(): Command {
   const program = new Command();
   program.name("mar").description("Multi-Agent Review orchestrator");
@@ -409,6 +491,15 @@ export function buildProgram(): Command {
     .argument("<input>", "path to the input document")
     .action(async (input: string) => {
       process.exitCode = await runRun(input);
+    });
+
+  program
+    .command("resume")
+    .description("Resume an interrupted/failed/paused run from its last completed phase")
+    .argument("[run-id]", "the run id to resume (omit when using --last)")
+    .option("--last", "resume the most-recent resumable run")
+    .action(async (runId: string | undefined, opts: { last?: boolean }) => {
+      process.exitCode = await runResume({ runId, last: opts.last });
     });
 
   return program;
