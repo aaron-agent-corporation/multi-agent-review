@@ -93,7 +93,20 @@ Plans:
   3. During drafting, an agent's working context provably excludes peer drafts (workspace-scoped), and drafts are promoted to the shared area only at the phase-1-to-2 boundary
   4. A planted-error catch test confirms independent drafts surface errors a shared-context run would mask
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — Adapter cwd seam + scoped-workspace independence primitive (PROT-04) + RED `mar run` e2e anchor
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 03-02-PLAN.md — XState v5 protocol engine (6-phase loop + artifacts-on-disk gate) + `mar run` wiring (PROT-01/03/04); anchor GREEN
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 03-03-PLAN.md — Planted-error A/B independence proof (success #4) + live human-verify checkpoint
 
 ### Phase 4: First End-to-End Run
 
@@ -136,6 +149,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
 | 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
-| 3. Protocol Engine + Independence Enforcement | 0/TBD | Not started | - |
+| 3. Protocol Engine + Independence Enforcement | 0/3 | Planned | - |
 | 4. First End-to-End Run | 0/TBD | Not started | - |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |
