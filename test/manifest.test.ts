@@ -75,6 +75,32 @@ describe("manifest (filesystem-as-truth)", () => {
     expect(m.status).toBe("completed");
     expect((await readManifest(rd)).status).toBe("completed");
   });
+
+  it("WR-01: concurrent addArtifact calls do not lose updates (in-process serialization)", async () => {
+    const rd = join(work, "runs", "r6");
+    await createRun({ runDir: rd, runId: "r6", cliVersions: {} });
+    // Fire many appends concurrently against the SAME runDir. Without per-runDir serialization each
+    // would read the same base manifest and the last rename would clobber the rest — only 1 entry
+    // would survive. With serialization, all N land.
+    const N = 12;
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        addArtifact(rd, {
+          path: `${String(i + 1).padStart(3, "0")}-claude-output.md`,
+          agent: "claude",
+          seq: i + 1,
+          kind: "output",
+          createdAt: new Date().toISOString(),
+        }),
+      ),
+    );
+    const onDisk = await readManifest(rd);
+    expect(onDisk.artifacts.length).toBe(N);
+    // Every seq 1..N present exactly once — no lost-update clobber.
+    expect(new Set(onDisk.artifacts.map((a) => a.seq))).toEqual(
+      new Set(Array.from({ length: N }, (_, i) => i + 1)),
+    );
+  });
 });
 
 describe("artifacts (atomic write + done-detection)", () => {
