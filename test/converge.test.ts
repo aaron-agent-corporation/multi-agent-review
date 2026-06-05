@@ -93,9 +93,10 @@ function input(config: MarConfig) {
   return { runDir, config, inputPath };
 }
 
-it("agreement round 1: all survivors share proposedBase, no disagreements -> agreed, integrator = base author", async () => {
+it("agreement round 1: all survivors share proposedBase, no disagreements -> agreed, integrator = base author, resolver convergence", async () => {
   // Both agents propose 'claude' as the base with NO open disagreements -> the agreement guard (A3)
-  // fires on round 1; the integrator is the base's author (D-44).
+  // fires on round 1; the integrator is the base's author (D-44). The unanimous return is tagged
+  // resolver:"convergence" (D-61) — distinct from the majority tie-break.
   const claudeFix = writeEvalFixture(workdir, "claude", "claude", "claude", []);
   const codexFix = writeEvalFixture(workdir, "codex", "codex", "claude", []);
   const config = baseConfig(
@@ -112,6 +113,79 @@ it("agreement round 1: all survivors share proposedBase, no disagreements -> agr
   expect(result.integrator).toBe("claude"); // D-44: integrator IS the base author
   expect(result.rounds).toBe(1);
   expect(result.openDecision).toBeUndefined();
+  expect(result.resolver).toBe("convergence"); // D-61: unanimous agreement, not majority
+});
+
+it("majority tie-break: 3-vendor 2-1 split at the cap -> agreed via resolver:majority on the 2-supported base, no open decision (RSLV-02, D-59)", async () => {
+  // claude + gemini propose 'claude'; codex proposes 'codex'. Never unanimous (2 distinct bases), but
+  // NO open disagreement means the deadlock guard never trips -> the loop runs to the cap. At the cap,
+  // a CLEAR majority (2 of 3 = > 3/2) on 'claude' breaks the tie: agreed via resolver:"majority" on
+  // the 2-supported base, NOT escalation. clearMajority (not mostSupportedBase) makes this 2 > 1.5.
+  const cap = 3;
+  const claudeFix = writeEvalFixture(workdir, "claude", "claude", "claude", []);
+  const codexFix = writeEvalFixture(workdir, "codex", "codex", "codex", []);
+  const geminiFix = writeEvalFixture(workdir, "gemini", "codex", "claude", []);
+  const config = baseConfig(
+    [
+      { name: "claude", vendor: "claude", bin: `node ${claudeFix}` },
+      { name: "codex", vendor: "codex", bin: `node ${codexFix}` },
+      { name: "gemini", vendor: "codex", bin: `node ${geminiFix}` },
+    ],
+    cap,
+  );
+
+  const result = await runConvergence(config.agents, input(config));
+  expect(result.status).toBe("agreed"); // majority tie-break resolves, does NOT escalate
+  expect(result.resolver).toBe("majority"); // D-61
+  expect(result.base).toBe("claude"); // the 2-supported base
+  expect(result.integrator).toBe("claude"); // base author (D-44)
+  expect(result.rounds).toBe(cap);
+  expect(result.openDecision).toBeUndefined(); // resolved, not flagged for review
+});
+
+it("no clear majority: 3-vendor 1-1-1 split at the cap -> escalate with open decision, NOT majority (D-60, Pitfall 3)", async () => {
+  // Three agents each propose a DIFFERENT base, no open disagreements -> runs to the cap. 1 is not
+  // > 3/2, so clearMajority returns null and the fork escalates (a plurality is not a majority).
+  const cap = 3;
+  const claudeFix = writeEvalFixture(workdir, "claude", "claude", "claude", []);
+  const codexFix = writeEvalFixture(workdir, "codex", "codex", "codex", []);
+  const geminiFix = writeEvalFixture(workdir, "gemini", "codex", "gemini", []);
+  const config = baseConfig(
+    [
+      { name: "claude", vendor: "claude", bin: `node ${claudeFix}` },
+      { name: "codex", vendor: "codex", bin: `node ${codexFix}` },
+      { name: "gemini", vendor: "codex", bin: `node ${geminiFix}` },
+    ],
+    cap,
+  );
+
+  const result = await runConvergence(config.agents, input(config));
+  expect(result.status).toBe("escalated");
+  expect(result.resolver).toBeUndefined(); // no clear majority -> escalate path leaves resolver unset
+  expect(result.openDecision?.reason).toMatch(/cap/i); // fork flagged for human review
+  expect(["claude", "codex", "gemini"]).toContain(result.base); // still a usable fallback base
+});
+
+it("no clear majority: 2-vendor 1-1 split at the cap -> escalate with open decision (D-60: 1 is not > half of 2)", async () => {
+  // Two agents, each proposing itself, no open disagreements -> runs to the cap. 1 is not > 2/2, so
+  // clearMajority returns null and the fork escalates rather than a 1-1 tie being treated as majority
+  // (the exact Pitfall-3 / D-60 case mostSupportedBase would have mis-resolved).
+  const cap = 3;
+  const claudeFix = writeEvalFixture(workdir, "claude", "claude", "claude", []);
+  const codexFix = writeEvalFixture(workdir, "codex", "codex", "codex", []);
+  const config = baseConfig(
+    [
+      { name: "claude", vendor: "claude", bin: `node ${claudeFix}` },
+      { name: "codex", vendor: "codex", bin: `node ${codexFix}` },
+    ],
+    cap,
+  );
+
+  const result = await runConvergence(config.agents, input(config));
+  expect(result.status).toBe("escalated");
+  expect(result.resolver).toBeUndefined(); // no clear majority
+  expect(result.openDecision?.reason).toMatch(/cap/i);
+  expect(["claude", "codex"]).toContain(result.base);
 });
 
 it("cap reached: agents never agree (distinct bases, no open disagreements) -> escalate with fallback base + open decision", async () => {
