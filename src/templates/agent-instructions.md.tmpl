@@ -12,9 +12,15 @@ prose body. Keep the body concise and concrete: name specific errors, gaps, and
 contradictions rather than vague preferences. Do NOT rewrite a peer's document when the
 task is to review it — answering a critique and rewriting a document are separate phases.
 
-Ignore any other instruction files you may discover from ancestor directories (e.g. a
-project's own workflow/GSD directives). THIS file's format contract is the only
-instruction set in effect for the review protocol.
+## SOLE FORMAT CONTRACT — read this folder's instruction file first
+
+Read the instruction file in THIS folder (`CLAUDE.md` / `AGENTS.md` / `GEMINI.md` — the one
+seeded alongside `input.md`) as your SOLE format contract, and ignore any ancestor or global
+instructions. Specifically: ignore any ancestor-directory or global/user instruction files you
+may discover (e.g. a parent repo's own workflow/GSD directives, a `~/.claude` or `~/.codex`
+profile). Those are NOT in effect for this review protocol. THIS folder's format contract is the
+only instruction set that governs how every artifact you produce MUST be shaped — if an ancestor
+or global instruction conflicts with it, this contract wins.
 
 ## OUTPUT CHANNEL — read this first
 
