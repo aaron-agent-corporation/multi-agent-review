@@ -20,6 +20,9 @@ Differently-trained frontier models catch each other's blind spots — the syste
 - [x] Configurable roster (`mar.config.json`) with vendor-distinctness gate refusing <2 distinct vendors (ORCH-04) — Validated in Phase 2
 - [x] Transient failures retried with bounded exponential backoff, every attempt audit-logged (ORCH-02) — Validated in Phase 2
 - [x] Tiered pre-flight (install check + live probe) surfaces CLI problems with actionable hints before a run (ORCH-05) — Validated in Phase 2 (live-verified: claude ✓, codex ✓, gemini correctly flagged for headless auth)
+- [x] Encoded 6-phase protocol with explicit turn-taking, artifact naming, and artifacts-on-disk phase gates — no human sequencing (PROT-01, PROT-03) — Validated in Phase 3: XState v5 engine, live-verified with real claude+codex through all 6 phases
+- [x] Independence enforcement: agents draft in scoped workdirs where peer drafts are physically absent; promotion to shared/ only at the draft→review boundary (PROT-04) — Validated in Phase 3 (falsifiable planted-error A/B proof: shared-context control masks the error, independent treatment surfaces it)
+- [x] Partial-failure resilience: failed agents dropped with manifest audit record, run continues with ≥2 distinct surviving vendors (D-30) — Validated in Phase 3 (live: gemini auth failure no longer dooms the run)
 
 ### Active
 
@@ -88,4 +91,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-04 after Phase 2 completion (Adapter Layer + Roster + Pre-flight — 3-vendor registry, retry, roster gates, and pre-flight live-verified; codex stdin-hang fixed)*
+*Last updated: 2026-06-05 after Phase 3 completion (Protocol Engine + Independence Enforcement — XState v5 engine live-verified through all 6 phases; falsifiable planted-error A/B proof; skip-failed wired)*
