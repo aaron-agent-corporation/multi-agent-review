@@ -81,10 +81,12 @@ it("mar run drives a 2-vendor roster through all 6 phases (RED anchor for Plan 0
   const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
   expect(manifest.status).toBe("completed");
 
-  // One artifact per agent for EACH of the 6 phase kinds (2 agents × 6 phases = 12).
+  // One artifact per agent for each phase EXCEPT integration, which exactly ONE integrator writes
+  // (REVW-04): 2 agents × 5 phases + 1 integrator = 11.
   const kinds = manifest.artifacts.map((a) => a.kind);
   for (const phase of PHASE_KINDS) {
-    expect(kinds.filter((k) => k === phase).length).toBe(2);
+    const expected = phase === "integration" ? 1 : 2;
+    expect(kinds.filter((k) => k === phase).length).toBe(expected);
   }
 });
 

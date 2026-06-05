@@ -50,7 +50,15 @@ describe("PHASES descriptor", () => {
       expect(prompt.length).toBeGreaterThan(0);
       // Anti-Pattern: the format contract (severities, verdicts, frontmatter keys) must NOT be
       // stuffed into the prompt — it lives in the seeded instruction file (04-02).
-      for (const token of ["P1", "P2", "P3", "severity", "accept", "reject-with-reason", "refine"]) {
+      for (const token of [
+        "P1",
+        "P2",
+        "P3",
+        "severity",
+        "accept",
+        "reject-with-reason",
+        "refine",
+      ]) {
         expect(prompt).not.toContain(token);
       }
     }

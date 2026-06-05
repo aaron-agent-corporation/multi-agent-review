@@ -54,11 +54,13 @@ it("drives a 2-vendor roster through all 6 phases -> status completed, one artif
   expect(manifest.status).toBe("completed");
 
   const kinds = manifest.artifacts.map((a: { kind: string }) => a.kind);
-  // Enumerate all 6 kinds explicitly: 2 agents x 6 phases = 12 artifacts, 2 per kind.
+  // REVW-04: every phase writes one artifact per surviving agent (2) EXCEPT integration, which is
+  // written by exactly ONE integrator. So 2×5 + 1 = 11 artifacts.
   for (const phase of PHASE_KINDS) {
-    expect(kinds.filter((k: string) => k === phase).length).toBe(2);
+    const expected = phase === "integration" ? 1 : 2;
+    expect(kinds.filter((k: string) => k === phase).length).toBe(expected);
   }
-  expect(manifest.artifacts.length).toBe(12);
+  expect(manifest.artifacts.length).toBe(11);
 });
 
 it("gates each phase on EXACTLY the paths the fan-out wrote (gated == written, source of truth)", async () => {
@@ -154,12 +156,14 @@ it("D-30 skip-failed: a draft-phase failure with >=2 survivors completes on the 
   expect(manifest.droppedAgents[0].vendor).toBe("gemini");
   expect(manifest.droppedAgents[0].phase).toBe("draft");
 
-  // All 6 kinds present, exactly 2 per kind (the surviving roster) — gemini never appears.
+  // All 6 kinds present over the surviving 2-agent roster — gemini never appears. 2 per kind except
+  // integration (1 integrator, REVW-04): 2×5 + 1 = 11.
   const kinds = manifest.artifacts.map((a: { kind: string }) => a.kind);
   for (const phase of PHASE_KINDS) {
-    expect(kinds.filter((k: string) => k === phase).length).toBe(2);
+    const expected = phase === "integration" ? 1 : 2;
+    expect(kinds.filter((k: string) => k === phase).length).toBe(expected);
   }
-  expect(manifest.artifacts.length).toBe(12);
+  expect(manifest.artifacts.length).toBe(11);
   expect(manifest.artifacts.some((a: { agent: string }) => a.agent === "gemini")).toBe(false);
   // gemini's draft was never promoted to shared/ (only the 2 survivors').
   const shared = readdirSync(join(runDir, "shared"));

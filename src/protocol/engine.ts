@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import matter from "gray-matter";
 import { assign, createActor, fromPromise, setup, toPromise } from "xstate";
 import { makeAdapter } from "../adapters/registry.js";
 import { applySkipFailed } from "../gates.js";
@@ -105,10 +106,10 @@ async function runPhase(
     roster.map(async (entry, index): Promise<AgentOutcome> => {
       const seq = seqFor(index);
       const adapter = makeAdapter(entry.vendor, entry.bin, entry.model);
-      // Minimal placeholder prompt — structured per-phase CONTENT is Phase 4 (RESEARCH A4); a
-      // minimal prompt that yields *a* phase artifact is correct here.
-      const promptText = `phase: ${phase.name}\ninput: ${inputPath}`;
-      const promptRef = `inline:phase:${phase.name}`;
+      // Thin per-phase prompt (D-37): references the seeded instruction file, carries NO format
+      // contract. The format vocabulary lives solely in work/<agent>/<vendor-file> (04-02).
+      const basePrompt = phase.prompt({ inputPath, phaseName: phase.name });
+      const promptRef = `phase:${phase.name}`;
       // PROT-04: only the draft phase runs in an isolated per-agent cwd. The scoped draft artifact
       // is also WRITTEN into that per-agent dir (`work/<agent>/`), so a peer can never read it from
       // a shared location until promoteDrafts copies it at the boundary. Non-scoped phases write
@@ -118,48 +119,101 @@ async function runPhase(
         : undefined;
       const artifactDir = cwd ?? runDir;
 
-      const turn = await withRetry(
-        () =>
-          adapter.invoke({
-            agent: entry.name,
-            promptText,
-            runDir,
-            seq,
-            timeoutMs,
-            ...(cwd ? { cwd } : {}),
-          }),
-        {
-          retries,
-          classify: CLASSIFY[entry.vendor],
-          onAttempt: (t, attempt) =>
-            logInvocation(runDir, {
-              command: t.redactedCommand,
-              promptRef,
-              exitCode: t.exitCode,
-              durationMs: t.durationMs,
-              timedOut: t.timedOut,
-              attempt,
+      // One transport-retried turn for `promptText`, written to an artifact. Returns the written
+      // artifact (ok) or a failure reason. The transport retry (withRetry / D-23) is DISTINCT from
+      // the validation retry below (D-38, Pitfall 5): this wraps only the spawn/transport layer.
+      const runTurn = async (
+        promptText: string,
+      ): Promise<
+        | { ok: true; written: { path: string }; text: string; durationMs: number }
+        | { ok: false; reason: string; durationMs: number }
+      > => {
+        const turn = await withRetry(
+          () =>
+            adapter.invoke({
+              agent: entry.name,
+              promptText,
+              runDir,
+              seq,
+              timeoutMs,
+              ...(cwd ? { cwd } : {}),
             }),
-        },
-      );
+          {
+            retries,
+            classify: CLASSIFY[entry.vendor],
+            onAttempt: (t, attempt) =>
+              logInvocation(runDir, {
+                command: t.redactedCommand,
+                promptRef,
+                exitCode: t.exitCode,
+                durationMs: t.durationMs,
+                timedOut: t.timedOut,
+                attempt,
+              }),
+          },
+        );
+        if (!turn.ok) {
+          const reason = turn.timedOut ? "timeout" : (turn.error ?? "failed");
+          return { ok: false, reason, durationMs: turn.durationMs };
+        }
+        const written = await writeArtifact(artifactDir, seq, entry.name, {
+          text: turn.text,
+          raw: turn,
+          kind: phase.kind,
+          frontmatter: { runId: manifest.runId, phase: phase.name },
+        });
+        return { ok: true, written, text: turn.text, durationMs: turn.durationMs };
+      };
 
-      const secs = (turn.durationMs / 1000).toFixed(1);
-      if (!turn.ok) {
-        const reason = turn.timedOut ? "timeout" : (turn.error ?? "failed");
-        process.stdout.write(`  ${entry.name} ✗  ${secs}s  (${reason})\n`);
-        return { entry, failure: reason };
+      // First attempt.
+      let attempt = await runTurn(basePrompt);
+      if (!attempt.ok) {
+        const secs = (attempt.durationMs / 1000).toFixed(1);
+        process.stdout.write(`  ${entry.name} ✗  ${secs}s  (${attempt.reason})\n`);
+        return { entry, failure: attempt.reason };
       }
 
-      const written = await writeArtifact(artifactDir, seq, entry.name, {
-        text: turn.text,
-        raw: turn,
-        kind: phase.kind,
-        frontmatter: { runId: manifest.runId, phase: phase.name },
-      });
+      // Validation-with-one-retry gate (D-38). Runs AFTER withRetry returns a successful turn —
+      // NOT inside it (Pitfall 5: transport retry and validation retry are distinct). gray-matter
+      // is used READ-only (the injection-safe toFrontmatter serializer still WRITES). Default
+      // js-yaml SAFE load (no `!!js/function`) — no custom unsafe schema is passed (T-04-07). On a
+      // schema miss we re-invoke the SAME adapter ONCE with the formatted zod issues appended; a
+      // second failure converts the turn to a FAILED turn so applySkipFailed (D-30) drops it.
+      //
+      // We validate the AGENT'S emitted markdown+frontmatter (the turn text), parsed with
+      // gray-matter. writeArtifact wraps that text under an engine-metadata frontmatter block
+      // (agent/seq/kind/timestamp/runId/phase) for the audit trail, so the on-disk `.md` has the
+      // engine block FIRST — parsing the file would validate engine metadata, not the agent's
+      // structured frontmatter. Parsing the agent text directly is the read that validates the
+      // attacker-influenceable content (T-04-06). The raw turn JSON + wrapped .md are still on disk.
+      if (phase.validate) {
+        const parseFront = (text: string): unknown => matter(text).data;
+        let result = phase.validate(parseFront(attempt.text));
+        if (!result.ok) {
+          process.stdout.write(`  ${entry.name} ↻ revalidating (validation errors fed back)\n`);
+          const retryPrompt = `${basePrompt}\n\n## Validation errors to fix\n${result.errors}`;
+          const reattempt = await runTurn(retryPrompt);
+          if (!reattempt.ok) {
+            const secs = (reattempt.durationMs / 1000).toFixed(1);
+            process.stdout.write(`  ${entry.name} ✗  ${secs}s  (${reattempt.reason})\n`);
+            return { entry, failure: reattempt.reason };
+          }
+          attempt = reattempt;
+          result = phase.validate(parseFront(attempt.text));
+          if (!result.ok) {
+            const secs = (attempt.durationMs / 1000).toFixed(1);
+            process.stdout.write(`  ${entry.name} ✗  ${secs}s  (validation-failed)\n`);
+            // Fail-closed: never silently auto-normalize a still-malformed artifact (D-38).
+            return { entry, failure: "validation-failed" };
+          }
+        }
+      }
+
+      const secs = (attempt.durationMs / 1000).toFixed(1);
       // Manifest path is ALWAYS relative to the run dir (scoped drafts live under work/<agent>/).
-      const relPath = written.path.slice(runDir.length + 1);
+      const relPath = attempt.written.path.slice(runDir.length + 1);
       process.stdout.write(`  ${entry.name} ✓  ${secs}s  → ${relPath}\n`);
-      return { entry, written: { absPath: written.path, relPath, agent: entry.name, seq } };
+      return { entry, written: { absPath: attempt.written.path, relPath, agent: entry.name, seq } };
     }),
   );
 
@@ -226,12 +280,34 @@ type PhaseOutcome = { survivors: AgentEntry[] } | { failure: PhaseFailure };
  * The roster shrinks monotonically across phases: an agent dropped in draft never participates in
  * review, and the gate/expected-count always reflect the live surviving roster.
  */
+/**
+ * Pick the single integrator for the integration phase (REVW-04, Pitfall 4). The convergence loop
+ * that SETS the designated integrator (e.g. from EvaluationFrontmatter.proposedBase agreement) lands
+ * in 04-04; until then we deterministically designate the FIRST surviving agent so the integration
+ * phase fans out over exactly one writer rather than the whole roster. PRECONDITION: integration
+ * requires at least one survivor — guaranteed here because the prior phases' gate fails closed on a
+ * zero-survivor roster, so `roster[0]` always exists when this runs.
+ */
+function designateIntegrator(roster: AgentEntry[]): AgentEntry {
+  const integrator = roster[0];
+  if (!integrator) {
+    // Defensive: the upstream gate fails closed before this, but never fan out over an empty roster.
+    throw new Error("integration phase requires a designated integrator but the roster is empty");
+  }
+  return integrator;
+}
+
 async function runPhaseGated(
   phase: Phase,
   roster: AgentEntry[],
   input: ProtocolInput,
 ): Promise<PhaseOutcome> {
-  const { writtenPaths, ok, failed } = await runPhase(phase, roster, input);
+  // REVW-04: the integration phase fans out over ONLY the designated integrator, not the surviving
+  // roster. Every other phase fans out over all survivors. The gate's expectedParticipantCount
+  // independently expects exactly 1 writer for the integrator phase, so a redundant non-integrator
+  // merge (or a missing merge) fails the gate.
+  const fanoutRoster = phase.participants === "integrator" ? [designateIntegrator(roster)] : roster;
+  const { writtenPaths, ok, failed } = await runPhase(phase, fanoutRoster, input);
 
   // A failure is a timeout iff EVERY failing agent timed out (the per-agent reason is the literal
   // "timeout" string set in runPhase). A mixed batch is reported as a generic failure — only an
@@ -272,13 +348,20 @@ async function runPhaseGated(
   }
 
   // The artifacts gate over EXACTLY the survivors' written paths (gated == written). The expected
-  // count is the SURVIVING roster's participant count, so a survivor short-write fails the gate.
-  // WR-03: requiredArtifactsExist now fails closed on an empty list, so a degenerate zero-survivor
-  // phase (writtenPaths == []) fails here rather than vacuously passing as `true && 0 === 0`.
+  // count is the participant count for the SURVIVING roster (1 for the integrator phase), so a
+  // survivor short-write — or a redundant non-integrator merge — fails the gate. WR-03:
+  // requiredArtifactsExist fails closed on an empty list, so a degenerate zero-survivor phase fails.
   const passes =
     requiredArtifactsExist(writtenPaths) &&
     writtenPaths.length === expectedParticipantCount(phase, survivors);
-  if (passes) return { survivors };
+  if (passes) {
+    // REVW-04: the integration phase ran over ONLY the integrator, but the non-integrators did NOT
+    // fail — they simply did not participate. Carry the FULL incoming roster forward so the
+    // following validation phase still fans out over every surviving agent (the integrator phase
+    // must not silently shrink the roster to one).
+    const carried = phase.participants === "integrator" ? roster : survivors;
+    return { survivors: carried };
+  }
   // Gate failure: distinguish a survivor short-write (a real gate miss) from a still-open cause.
   return {
     failure: {

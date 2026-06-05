@@ -27,6 +27,17 @@ export interface PhasePromptCtx {
   readonly phaseName: string;
 }
 
+/**
+ * A thin, machine-tag-prefixed prompt: `[phase:<name>] <instruction>`. The leading tag is the ONLY
+ * structured token in the prompt — it lets a hermetic fixture know which phase it is answering
+ * (so it can emit the matching schema-valid frontmatter, D-49) without the prompt carrying the
+ * format contract itself. The tag is the phase NAME, never the format vocabulary (no P1/severity/
+ * verdict tokens), so the contract still lives solely in the seeded instruction file (D-37).
+ */
+function thinPrompt(phaseName: string, instruction: string): string {
+  return `[phase:${phaseName}] ${instruction}`;
+}
+
 /** The outcome of validating a turn's frontmatter against a phase's zod schema (D-38). */
 export type PhaseValidation = { ok: true } | { ok: false; errors: string };
 
@@ -73,14 +84,18 @@ export const PHASES: readonly Phase[] = [
     kind: "draft",
     scoped: true,
     participants: "all",
-    prompt: () => "Draft the document per your seeded instructions.",
+    prompt: (ctx) => thinPrompt(ctx.phaseName, "Draft the document per your seeded instructions."),
   },
   {
     name: "review",
     kind: "review",
     scoped: false,
     participants: "all",
-    prompt: () => "Review the peer drafts in this folder per your seeded instructions.",
+    prompt: (ctx) =>
+      thinPrompt(
+        ctx.phaseName,
+        "Review the peer drafts in this folder per your seeded instructions.",
+      ),
     validate: makeValidator(ReviewFrontmatter),
   },
   {
@@ -88,7 +103,11 @@ export const PHASES: readonly Phase[] = [
     kind: "response",
     scoped: false,
     participants: "all",
-    prompt: () => "Respond to the reviews of your draft per your seeded instructions.",
+    prompt: (ctx) =>
+      thinPrompt(
+        ctx.phaseName,
+        "Respond to the reviews of your draft per your seeded instructions.",
+      ),
     validate: makeValidator(ResponseFrontmatter),
   },
   {
@@ -96,7 +115,11 @@ export const PHASES: readonly Phase[] = [
     kind: "evaluation",
     scoped: false,
     participants: "all",
-    prompt: () => "Evaluate the responses and propose a base per your seeded instructions.",
+    prompt: (ctx) =>
+      thinPrompt(
+        ctx.phaseName,
+        "Evaluate the responses and propose a base per your seeded instructions.",
+      ),
     validate: makeValidator(EvaluationFrontmatter),
   },
   {
@@ -104,7 +127,11 @@ export const PHASES: readonly Phase[] = [
     kind: "integration",
     scoped: false,
     participants: "integrator",
-    prompt: () => "Integrate the agreed additions into the base per your seeded instructions.",
+    prompt: (ctx) =>
+      thinPrompt(
+        ctx.phaseName,
+        "Integrate the agreed additions into the base per your seeded instructions.",
+      ),
     validate: makeValidator(IntegrationFrontmatter),
   },
   {
@@ -112,6 +139,7 @@ export const PHASES: readonly Phase[] = [
     kind: "validation",
     scoped: false,
     participants: "all",
-    prompt: () => "Validate the integrated document per your seeded instructions.",
+    prompt: (ctx) =>
+      thinPrompt(ctx.phaseName, "Validate the integrated document per your seeded instructions."),
   },
 ] as const;
