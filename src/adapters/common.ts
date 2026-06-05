@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path";
 
 /**
  * The placeholder substituted for the prompt body in the redacted command (WR-04 / D-15). The
@@ -19,10 +20,14 @@ export const PROMPT_PLACEHOLDER = "<prompt>";
  */
 export function splitBin(bin: string): { cmd: string; preArgs: string[] } {
   const trimmed = bin.trim();
-  // If the WHOLE value is itself an existing executable file (e.g. a fixture path that may
-  // contain spaces), use it directly — never split it. This disambiguates a spaced path from a
-  // `node <script>` launcher form.
-  if (existsSync(trimmed)) return { cmd: trimmed, preArgs: [] };
+  // If the WHOLE value LOOKS like a path (absolute, or contains a separator) AND that path exists,
+  // use it directly — never split it. This disambiguates a spaced path from a `node <script>`
+  // launcher form. WR-06: the path-shape guard is REQUIRED — without it, a bare vendor name like
+  // "claude" would resolve to the relative `./claude` whenever the cwd happens to contain a file
+  // named `claude` (a cwd-driven path-confusion footgun). A bare name now always flows to PATH
+  // resolution by execa.
+  const looksLikePath = isAbsolute(trimmed) || trimmed.includes("/") || trimmed.includes("\\");
+  if (looksLikePath && existsSync(trimmed)) return { cmd: trimmed, preArgs: [] };
   const i = trimmed.search(/\s/);
   if (i === -1) return { cmd: trimmed, preArgs: [] };
   return { cmd: trimmed.slice(0, i), preArgs: [trimmed.slice(i + 1).trim()] };

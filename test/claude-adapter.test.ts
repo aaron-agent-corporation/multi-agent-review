@@ -1,5 +1,8 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TurnRequest } from "../src/adapters/adapter.js";
 import { makeClaudeAdapter, splitBin } from "../src/adapters/claude.js";
 
@@ -26,6 +29,22 @@ describe("splitBin (WR-01: single split keeps spaced paths intact)", () => {
     // The fixture path itself contains no spaces, but it IS an existing file, so it must be
     // returned verbatim as the executable with no preArgs.
     expect(splitBin(FIXTURE)).toEqual({ cmd: FIXTURE, preArgs: [] });
+  });
+
+  describe("WR-06: a bare vendor name is never path-confused by cwd contents", () => {
+    const origCwd = process.cwd();
+    afterEach(() => process.chdir(origCwd));
+
+    it("a bare 'claude' flows to PATH even when the cwd contains a file named claude", () => {
+      // Plant a file literally named "claude" in a fresh cwd. The OLD code did a bare
+      // existsSync("claude"), which would resolve the relative ./claude and execute the WRONG
+      // file. The path-shape guard means a bare name (no separator, not absolute) is always
+      // returned as the executable for execa to resolve on PATH — never the cwd file.
+      const dir = mkdtempSync(join(tmpdir(), "splitbin-wr06-"));
+      writeFileSync(join(dir, "claude"), "#!/bin/sh\necho gotcha\n");
+      process.chdir(dir);
+      expect(splitBin("claude")).toEqual({ cmd: "claude", preArgs: [] });
+    });
   });
 });
 
