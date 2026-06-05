@@ -166,3 +166,32 @@ it("D-30 skip-failed: a draft-phase failure with >=2 survivors completes on the 
   expect(shared).not.toContain("001-gemini-draft.md");
   expect(shared.filter((n: string) => n.endsWith("-draft.md")).length).toBe(2);
 });
+
+it("CR-01: an all-timeout phase failure -> status timeout (D-17, not generic failed) + failureReason", async () => {
+  // Both agents hang past timeoutMs (a never-exiting script), so EVERY failing agent's per-turn
+  // reason is the literal "timeout". The terminal mapping must preserve the distinct D-17
+  // `timeout` status — not collapse it into `failed` — and persist a failureReason so the
+  // manifest records WHY the run died, not just that it did.
+  // NOTE: a dedicated hang script (not `node fixture.mjs --hang`) because splitBin treats
+  // everything after the first space as ONE preArg — a multi-arg bin string cannot work.
+  const hangScript = join(workdir, "hang.mjs");
+  writeFileSync(hangScript, "setInterval(() => {}, 1e9);\n", "utf8");
+  const config = {
+    agents: [
+      { name: "claude", vendor: "claude", bin: `node ${hangScript}` },
+      { name: "codex", vendor: "codex", bin: `node ${hangScript}` },
+    ],
+    defaults: { timeoutMs: 1_000, retries: 0 },
+  } as MarConfig;
+
+  const exit = await runProtocol(runDir, config, inputPath);
+  expect(exit).not.toBe(0);
+
+  const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
+  expect(manifest.status).toBe("timeout"); // distinct D-17 signal, NOT "failed"
+  expect(typeof manifest.failureReason).toBe("string");
+  expect(manifest.failureReason.length).toBeGreaterThan(0);
+  // The run never advanced: no drafts survived, nothing was promoted.
+  expect(manifest.artifacts.length).toBe(0);
+  expect(existsSync(join(runDir, "shared"))).toBe(false);
+});
