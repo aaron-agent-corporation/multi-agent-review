@@ -16,6 +16,7 @@ import { writeArtifact } from "../workspace/artifacts.js";
 import { nextSeq } from "../workspace/layout.js";
 import { addArtifact, addDroppedAgent, readManifest, setStatus } from "../workspace/manifest.js";
 import { promoteDrafts, scopedWorkdir } from "../workspace/scope.js";
+import { type ConvergenceResult, runConvergence } from "./converge.js";
 import { expectedParticipantCount, requiredArtifactsExist } from "./gate.js";
 import { PHASES, type Phase } from "./phases.js";
 
@@ -282,14 +283,29 @@ type PhaseOutcome = { survivors: AgentEntry[] } | { failure: PhaseFailure };
  */
 /**
  * Pick the single integrator for the integration phase (REVW-04, Pitfall 4). The convergence loop
- * that SETS the designated integrator (e.g. from EvaluationFrontmatter.proposedBase agreement) lands
- * in 04-04; until then we deterministically designate the FIRST surviving agent so the integration
- * phase fans out over exactly one writer rather than the whole roster. PRECONDITION: integration
- * requires at least one survivor — guaranteed here because the prior phases' gate fails closed on a
- * zero-survivor roster, so `roster[0]` always exists when this runs.
+ * (04-04) SETS the integrator from the agreed/fallback base's author (D-44) and threads it here via
+ * `designated`. When a designated integrator is supplied we resolve it to its roster entry; if (only
+ * defensively) it is absent we fall back to the FIRST survivor so the integration phase still fans
+ * out over exactly one writer rather than the whole roster. PRECONDITION: integration requires at
+ * least one survivor — guaranteed because the prior phases' gate fails closed on a zero-survivor
+ * roster, so `roster[0]` always exists when this runs.
  */
-function designateIntegrator(roster: AgentEntry[]): AgentEntry {
-  const integrator = roster[0];
+/**
+ * Resolve the convergence-designated integrator NAME (D-44) to its LIVE roster entry. Falls back to
+ * the first survivor only defensively (the convergence loop always names a real survivor's author).
+ */
+function resolveIntegrator(roster: AgentEntry[], integratorName: string): AgentEntry {
+  return roster.find((a) => a.name === integratorName) ?? roster[0];
+}
+
+function designateIntegrator(roster: AgentEntry[], designated?: AgentEntry): AgentEntry {
+  // Prefer the convergence-designated integrator (D-44), matched by name against the LIVE roster so
+  // the entry's vendor/bin are the surviving roster's, not a stale copy.
+  if (designated) {
+    const match = roster.find((a) => a.name === designated.name);
+    if (match) return match;
+  }
+  const integrator = designated ?? roster[0];
   if (!integrator) {
     // Defensive: the upstream gate fails closed before this, but never fan out over an empty roster.
     throw new Error("integration phase requires a designated integrator but the roster is empty");
@@ -301,12 +317,16 @@ async function runPhaseGated(
   phase: Phase,
   roster: AgentEntry[],
   input: ProtocolInput,
+  designatedIntegrator?: AgentEntry,
 ): Promise<PhaseOutcome> {
   // REVW-04: the integration phase fans out over ONLY the designated integrator, not the surviving
   // roster. Every other phase fans out over all survivors. The gate's expectedParticipantCount
   // independently expects exactly 1 writer for the integrator phase, so a redundant non-integrator
   // merge (or a missing merge) fails the gate.
-  const fanoutRoster = phase.participants === "integrator" ? [designateIntegrator(roster)] : roster;
+  const fanoutRoster =
+    phase.participants === "integrator"
+      ? [designateIntegrator(roster, designatedIntegrator)]
+      : roster;
   const { writtenPaths, ok, failed } = await runPhase(phase, fanoutRoster, input);
 
   // A failure is a timeout iff EVERY failing agent timed out (the per-agent reason is the literal
@@ -380,10 +400,26 @@ interface ProtocolContext {
   roster: AgentEntry[];
   /** Set on the failure path so {@link runProtocol} can persist the cause + pick timeout vs failed. */
   failure?: PhaseFailure;
+  /**
+   * The single integrator designated by the convergence loop (D-44): the agreed/fallback base's
+   * author. The integration phase fans out over ONLY this agent (REVW-04). Set when the evaluation
+   * convergence actor resolves; consumed by the integration phase's `runPhaseGated`.
+   */
+  integrator?: AgentEntry;
+  /**
+   * The full convergence resolution (base, integrator, rounds, status, concessions, openDecision).
+   * Its `status` drives the run's terminal status: an `escalated` convergence makes the completed run
+   * terminal-status `escalated` rather than `completed` (O-2 additive), even though integration still
+   * runs with the fallback base. The 04-05 decision-record writer reads concessions/openDecision.
+   */
+  convergence?: ConvergenceResult;
 }
 
 /** A phase actor resolves with the surviving roster (continue) or a structured failure (fail). */
 type PhaseEvent = { output: PhaseOutcome };
+
+/** The convergence actor resolves with the loop's full resolution (base/integrator/status/...). */
+type ConvergenceEvent = { output: ConvergenceResult };
 
 /** An XState `onError` event carrying the thrown actor error (the cause the engine must surface). */
 type ErrorEvent = { error: unknown };
@@ -410,8 +446,8 @@ function failureFromError(prefix: string, error: unknown): PhaseFailure {
 function buildMachine() {
   const phaseActor = fromPromise<
     PhaseOutcome,
-    { phase: Phase; roster: AgentEntry[]; input: ProtocolInput }
-  >(({ input }) => runPhaseGated(input.phase, input.roster, input.input));
+    { phase: Phase; roster: AgentEntry[]; input: ProtocolInput; integrator?: AgentEntry }
+  >(({ input }) => runPhaseGated(input.phase, input.roster, input.input, input.integrator));
   const promoteActor = fromPromise<void, { roster: AgentEntry[]; input: ProtocolInput }>(
     ({ input }) =>
       promoteDrafts(
@@ -419,6 +455,13 @@ function buildMachine() {
         input.roster.map((a) => a.name),
       ),
   );
+  // The evaluation phase IS the bounded convergence loop (D-40): instead of one evaluation fan-out it
+  // runs runConvergence (round loop, agreement/cap/unresolvable guards) and resolves the designated
+  // base + integrator. The integration phase that follows fans out over ONLY that integrator.
+  const convergenceActor = fromPromise<
+    ConvergenceResult,
+    { roster: AgentEntry[]; input: ProtocolInput }
+  >(({ input }) => runConvergence(input.roster, input.input));
 
   // Build the per-phase states programmatically so the 6-phase series stays in lock-step with
   // PHASES (single source of the phase order). The draft phase advances to a transient `promote`
@@ -428,6 +471,45 @@ function buildMachine() {
     const phase = PHASES[i];
     const isLast = i + 1 >= PHASES.length;
     const next = phase.name === "draft" ? "promote" : isLast ? "done" : PHASES[i + 1].name;
+
+    // The evaluation phase is the convergence loop (D-40), not a single gated fan-out. It invokes
+    // the convergenceActor, which runs the bounded round loop and resolves the designated base +
+    // integrator; on done we record the integrator (D-44, consumed by the integration phase over
+    // exactly one writer) and the full convergence result (its status drives the terminal status:
+    // an escalated convergence → terminal `escalated`, but the run STILL advances to integration
+    // with the fallback base — O-2 (a)). A thrown convergence actor (e.g. no parseable base) routes
+    // to `failed` with the cause preserved.
+    if (phase.name === "evaluation") {
+      states[phase.name] = {
+        invoke: {
+          src: "convergenceActor",
+          input: ({ context }: { context: ProtocolContext }) => ({
+            roster: context.roster,
+            input: context.input,
+          }),
+          onDone: {
+            target: next,
+            actions: assign({
+              convergence: ({ event }: { event: ConvergenceEvent }) => event.output,
+              integrator: ({ context, event }) =>
+                resolveIntegrator(
+                  context.roster,
+                  (event as unknown as ConvergenceEvent).output.integrator,
+                ),
+            }),
+          },
+          onError: {
+            target: "failed",
+            actions: assign({
+              failure: ({ event }: { event: ErrorEvent }) =>
+                failureFromError("evaluation convergence actor error", event.error),
+            }),
+          },
+        },
+      };
+      continue;
+    }
+
     states[phase.name] = {
       invoke: {
         src: "phaseActor",
@@ -435,6 +517,10 @@ function buildMachine() {
           phase,
           roster: context.roster,
           input: context.input,
+          // The integration phase fans out over ONLY the convergence-designated integrator (D-44 /
+          // REVW-04). Passed through for every phase; runPhaseGated ignores it unless the phase is
+          // participants:"integrator".
+          integrator: context.integrator,
         }),
         onDone: [
           {
@@ -491,7 +577,7 @@ function buildMachine() {
 
   return setup({
     types: {} as { context: ProtocolContext; input: ProtocolInput },
-    actors: { phaseActor, promoteActor },
+    actors: { phaseActor, promoteActor, convergenceActor },
   }).createMachine({
     id: "protocol",
     initial: PHASES[0].name,
@@ -521,7 +607,13 @@ export async function runProtocol(
   await toPromise(actor);
   const snapshot = actor.getSnapshot();
   if (snapshot.value === "done") {
-    await setStatus(runDir, "completed");
+    // O-2 (a): a run whose convergence ESCALATED (cap/deadlock → fallback base) completed the full
+    // protocol and produced a merged artifact, but did so via an escalation rather than unanimous
+    // agreement. Record the distinct `escalated` terminal status (additive, D-41/D-42) so the
+    // unresolved fork is observable; the open decision itself is logged in the 04-05 record. Any
+    // other completed run is `completed`.
+    const escalated = snapshot.context.convergence?.status === "escalated";
+    await setStatus(runDir, escalated ? "escalated" : "completed");
     return 0;
   }
   // Failure: prefer the cause captured in context; fall back to a generic reason if (defensively)

@@ -176,7 +176,10 @@ export async function runConvergence(
   roster: AgentEntry[],
   input: ProtocolInput,
 ): Promise<ConvergenceResult> {
-  const cap = input.config.defaults.convergenceCap;
+  // The hard backstop (D-41c). Fall back to the schema default (10) if the config was constructed
+  // without going through MarConfig.parse (e.g. a hand-built test config) so the loop is never
+  // governed by an undefined cap (`round <= undefined` is always false → zero rounds).
+  const cap = input.config.defaults.convergenceCap ?? 10;
   // How many CONSECUTIVE rounds of a stable, conflicting split count as an unresolvable deadlock
   // (D-41b). 2 means: if two rounds in a row show agents split across conflicting bases with open
   // disagreements AND the disagreement set did not shrink, the loop concludes the debate is stuck and
