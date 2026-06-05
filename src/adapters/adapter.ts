@@ -16,6 +16,12 @@ export interface TurnRequest {
   seq: number;
   /** External wall-clock timeout in milliseconds (D-17). */
   timeoutMs: number;
+  /**
+   * Optional scoped working directory for the draft phase (PROT-04); omitted -> execa uses
+   * process cwd (unchanged behavior). When set, the turn runs in a per-agent `work/<agent>/`
+   * dir that physically lacks any peer's draft, making independence a filesystem fact.
+   */
+  cwd?: string;
 }
 
 /**

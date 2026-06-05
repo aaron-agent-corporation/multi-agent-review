@@ -10,14 +10,32 @@
 //   --untrusted      → plain text "not running in a trusted directory" on STDERR, exit 55
 //   --rate-limit     → {error:{code:429, message:"RESOURCE_EXHAUSTED"}} on STDERR, exit 1
 //   --bad-json       → writes "not json" to STDOUT, exit 0 (no parseable JSON)
+//   --emit <kind>    → happy success envelope, but `response` is the kind-tagged marker
+//                      "gemini:<kind>" so a multi-phase run yields distinct per-phase artifacts
+//                      while preserving the docs success shape. (additive; default unchanged.)
 //   --hang           → never exits (for timeout/kill tests)
 // The prompt is read from argv but is not required.
 
 const args = process.argv.slice(2);
 
+/** Value following `--emit` (e.g. "draft"), or undefined when the flag is absent. */
+function emitKind() {
+  const i = args.indexOf("--emit");
+  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
+}
+
 if (args.includes("--hang")) {
   // Never exit — lets a wall-clock timeout test kill us.
   setInterval(() => {}, 1e9);
+} else if (emitKind() !== undefined) {
+  // Per-phase marker mode: same docs success shape, response tagged by phase kind.
+  process.stdout.write(
+    JSON.stringify({
+      response: `gemini:${emitKind()}`,
+      stats: { models: {}, tools: {} },
+    }),
+  );
+  process.exit(0);
 } else if (args.includes("--fail-auth")) {
   // Auth method not selected: the {error} JSON came out on STDERR live, exit 41 (undocumented).
   process.stderr.write(

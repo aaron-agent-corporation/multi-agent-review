@@ -52,6 +52,9 @@ export function makeGeminiAdapter(bin = "gemini", model?: string): AgentAdapter 
         // the same block codex exhibited. `stdin:"ignore"` makes the CLI see EOF and proceed.
         stdin: "ignore",
         // No shell (execa passes argv as an array) — prompt cannot inject shell commands (T-02-01).
+        // PROT-04: scoped draft-phase cwd, conditionally spread LAST so the absent case spawns the
+        // EXACT same options as today (omit when unset → unchanged behavior).
+        ...(req.cwd ? { cwd: req.cwd } : {}),
       });
 
       const durationMs = result.durationMs ?? 0;

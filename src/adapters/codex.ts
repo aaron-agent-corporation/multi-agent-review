@@ -57,6 +57,10 @@ export function makeCodexAdapter(bin = "codex", model?: string): AgentAdapter {
         // stdin closed. claude tolerated the open pipe, which is why this only surfaced for codex.
         stdin: "ignore",
         // No shell (execa passes argv as an array) — prompt cannot inject shell commands (T-02-01).
+        // PROT-04: scoped draft-phase cwd, conditionally spread LAST so the absent case spawns the
+        // EXACT same options as today. --skip-git-repo-check keeps codex happy under a non-repo cwd
+        // and --ephemeral keeps rollout/session files out of work/<agent>/ (Pitfall 4).
+        ...(req.cwd ? { cwd: req.cwd } : {}),
       });
 
       const durationMs = result.durationMs ?? 0;
