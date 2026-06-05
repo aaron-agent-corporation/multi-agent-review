@@ -10,28 +10,37 @@
 //   --untrusted      → plain text "not running in a trusted directory" on STDERR, exit 55
 //   --rate-limit     → {error:{code:429, message:"RESOURCE_EXHAUSTED"}} on STDERR, exit 1
 //   --bad-json       → writes "not json" to STDOUT, exit 0 (no parseable JSON)
-//   --emit <kind>    → happy success envelope, but `response` is the kind-tagged marker
-//                      "gemini:<kind>" so a multi-phase run yields distinct per-phase artifacts
-//                      while preserving the docs success shape. (additive; default unchanged.)
+//   --emit <kind>    → happy success envelope whose `response` is a SCHEMA-VALID
+//                      markdown+frontmatter artifact for <kind> (review/response/evaluation/
+//                      integration per the 04-01 schemas); draft/validation/unknown fall back to the
+//                      "gemini:<kind>" marker. Also triggered by a `[phase:<name>]` prompt tag from
+//                      the engine so a hermetic run produces structured artifacts (D-49).
+//   --emit-malformed <kind> → like --emit but the frontmatter VIOLATES the <kind> schema, to drive
+//                      the D-38 validation one-retry path. (additive; default unchanged.)
+//   MAR_EMIT_BASE=<agent> (env) → steer the proposedBase/base emitted by evaluation/integration.
 //   --hang           → never exits (for timeout/kill tests)
 // The prompt is read from argv but is not required.
 
+import { resolveEmitBody } from "./structured-shared.mjs";
+
 const args = process.argv.slice(2);
 
-/** Value following `--emit` (e.g. "draft"), or undefined when the flag is absent. */
-function emitKind() {
-  const i = args.indexOf("--emit");
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
+/**
+ * The structured body this fixture should emit (D-49): a schema-valid (or, with --emit-malformed, a
+ * deliberately invalid) markdown+frontmatter body for the requested kind / engine phase, or
+ * undefined when no emit/phase mode applies. Shared with the other fixtures (structured-shared.mjs).
+ */
+const emitBody = resolveEmitBody("gemini", args);
 
 if (args.includes("--hang")) {
   // Never exit — lets a wall-clock timeout test kill us.
   setInterval(() => {}, 1e9);
-} else if (emitKind() !== undefined) {
-  // Per-phase marker mode: same docs success shape, response tagged by phase kind.
+} else if (emitBody !== undefined) {
+  // Structured-emit mode (D-49): docs success shape, `response` is the schema-valid (or
+  // --emit-malformed) markdown+frontmatter body for the requested kind / engine phase.
   process.stdout.write(
     JSON.stringify({
-      response: `gemini:${emitKind()}`,
+      response: emitBody,
       stats: { models: {}, tools: {} },
     }),
   );

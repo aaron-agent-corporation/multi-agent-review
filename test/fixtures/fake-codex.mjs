@@ -11,9 +11,14 @@
 //                      (the test injects a fresh temp dir), so the SAME fixture exercises the
 //                      transient-then-ok retry path across separate adapter spawns (D-25).
 //   --bad-json       → writes "not json" to stdout, exit 0 (no parseable terminal event)
-//   --emit <kind>    → happy NDJSON envelope, but the agent_message text is the kind-tagged
-//                      marker "codex:<kind>" so a multi-phase run yields distinct per-phase
-//                      artifacts while preserving the verified NDJSON shape. (additive.)
+//   --emit <kind>    → happy NDJSON envelope whose agent_message is a SCHEMA-VALID
+//                      markdown+frontmatter artifact for <kind> (review/response/evaluation/
+//                      integration per the 04-01 schemas); draft/validation/unknown fall back to the
+//                      "codex:<kind>" marker. Also triggered by a `[phase:<name>]` prompt tag from
+//                      the engine so a hermetic run produces structured artifacts (D-49).
+//   --emit-malformed <kind> → like --emit but the frontmatter VIOLATES the <kind> schema, to drive
+//                      the D-38 validation one-retry path. (additive; default unchanged.)
+//   MAR_EMIT_BASE=<agent> (env) → steer the proposedBase/base emitted by evaluation/integration.
 //   MAR_PLANTED_MODE=1 (env) → A/B INDEPENDENCE PROOF mode (test/planted-error.test.ts), codex twin
 //                      of fake-claude. Env-activated (the injectable `bin` is split on the first
 //                      whitespace only, so extra bin flags can't survive). The phase- and
@@ -30,14 +35,16 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { plantedBody, plantedMode } from "./planted-shared.mjs";
+import { resolveEmitBody } from "./structured-shared.mjs";
 
 const args = process.argv.slice(2);
 
-/** Value following `--emit` (e.g. "draft"), or undefined when the flag is absent. */
-function emitKind() {
-  const i = args.indexOf("--emit");
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
+/**
+ * The structured body this fixture should emit (D-49): a schema-valid (or, with --emit-malformed, a
+ * deliberately invalid) markdown+frontmatter body for the requested kind / engine phase, or
+ * undefined when no emit/phase mode applies. Shared with the other fixtures (structured-shared.mjs).
+ */
+const emitBody = resolveEmitBody("codex", args);
 
 /** Write one NDJSON event line to stdout. */
 function emit(obj) {
@@ -77,24 +84,10 @@ if (args.includes("--hang")) {
   // planted-shared.mjs). Draft records the peer-visibility probe (falsifiability), control shares
   // context off disk, review reports DISCREPANCY/AGREED from promoted peer drafts.
   emitMessage(plantedBody("codex", args));
-} else if (emitKind() !== undefined) {
-  // Per-phase marker mode: same verified NDJSON success sequence, agent_message tagged by kind.
-  emit({ type: "thread.started", thread_id: "019e941a-ok" });
-  emit({ type: "turn.started" });
-  emit({
-    type: "item.completed",
-    item: { id: "item_0", type: "agent_message", text: `codex:${emitKind()}` },
-  });
-  emit({
-    type: "turn.completed",
-    usage: {
-      input_tokens: 19484,
-      cached_input_tokens: 3456,
-      output_tokens: 20,
-      reasoning_output_tokens: 13,
-    },
-  });
-  process.exit(0);
+} else if (emitBody !== undefined) {
+  // Structured-emit mode (D-49): same verified NDJSON success sequence, agent_message is the
+  // schema-valid (or --emit-malformed) markdown+frontmatter body for the kind / engine phase.
+  emitMessage(emitBody);
 } else if (args.includes("--fail-auth")) {
   // Codex retries the endpoint internally before giving up — emit the 401 error a few times,
   // then the terminal turn.failed. exit 1.
