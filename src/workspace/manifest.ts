@@ -32,7 +32,7 @@ function manifestPath(runDir: string): string {
  */
 const writeChains = new Map<string, Promise<unknown>>();
 
-function serializeWrite<T>(runDir: string, op: () => Promise<T>): Promise<T> {
+export function serializeWrite<T>(runDir: string, op: () => Promise<T>): Promise<T> {
   const prior = writeChains.get(runDir) ?? Promise.resolve();
   // Run `op` only after the prior write for this runDir settles (success OR failure — a failed
   // mutation must not wedge the chain). The chained promise is the new tail.

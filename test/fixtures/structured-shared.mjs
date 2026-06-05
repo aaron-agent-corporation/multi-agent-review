@@ -10,7 +10,7 @@
 // `--emit <kind>` / `--emit-malformed <kind>` flags drive the same generators directly for the
 // validation-retry test and the Task-3 verify command.
 
-import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -224,6 +224,91 @@ function failOnceBody(author, args) {
 }
 
 /**
+ * RE-LITIGATION mode (RCRD-02 / D-64 enforcement test). Two env knobs steer it:
+ *   MAR_RELITIGATE_RESPONSE=<author>  → during the RESPONSE phase, that author SETTLES a fork by
+ *       emitting a `reject-with-reason` for issue 1 (the engine appends `response-<author>-issue-1`
+ *       to shared/resolved-decisions.md with resolver "convergence").
+ *   MAR_RELITIGATE_ID=<id>            → during the INTEGRATION phase, the integrator's addition names
+ *       `<id>` as its additionRef — REOPENING that settled decision. The engine's enforcement drops
+ *       the position with a `re-litigation` reason and continues.
+ * Returns a body when armed for the matching phase, else undefined (fall through).
+ */
+function relitigationBody(author, args) {
+  const phase = phaseFromArgs(args);
+  if (phase === "response" && process.env.MAR_RELITIGATE_RESPONSE === author) {
+    return withFrontmatter(
+      [
+        "phase: response",
+        `author: ${author}`,
+        "reviewOf: peer-review",
+        "responses:",
+        "  - verdict: reject-with-reason",
+        "    issueRef: 1",
+        '    reason: "rejecting issue 1 — this is the SETTLED fork"',
+      ].join("\n"),
+      `# Response by ${author}\n\nRejected issue 1 with a reason — settles the fork.`,
+    );
+  }
+  if (phase === "integration" && process.env.MAR_RELITIGATE_ID) {
+    const settledId = process.env.MAR_RELITIGATE_ID;
+    return withFrontmatter(
+      [
+        "phase: integration",
+        `author: ${author}`,
+        `base: ${proposedBase(author)}`,
+        "additions:",
+        "  - verdict: merged",
+        `    additionRef: ${settledId}`,
+      ].join("\n"),
+      `# Integrated document by ${author}\n\nAddition reopens settled ${settledId} (re-litigation).`,
+    );
+  }
+  return undefined;
+}
+
+/**
+ * LEDGER-READ ECHO mode (RCRD-02 / D-62 inject test). When `MAR_LEDGER_ECHO_DIR` and
+ * `MAR_LEDGER_ECHO_ID` are set, on EVERY invocation this fixture reads `shared/resolved-decisions.md`
+ * (relative to cwd — non-scoped phases run in the run dir) and appends one line to
+ * `<dir>/<author>.echo` reporting whether the given decision id was visible: `SAW <id>` / `MISSED <id>`.
+ * Proves the seeded directive's target (the ledger) is actually available to a later-phase agent. A
+ * best-effort no-op when the env is unset or the file is absent.
+ *
+ * Non-scoped phases run with the fixture's cwd inherited from the engine (the project workdir, not the
+ * run dir), so the ledger lives at `runs/<id>/shared/resolved-decisions.md` relative to cwd — we scan
+ * `runs/` for the (single, in these tests) run dir to read it.
+ */
+function maybeEchoLedger(author) {
+  const dir = process.env.MAR_LEDGER_ECHO_DIR;
+  const id = process.env.MAR_LEDGER_ECHO_ID;
+  if (!dir || !id) return;
+  let saw = false;
+  try {
+    let runIds = [];
+    try {
+      runIds = readdirSync("runs");
+    } catch {
+      runIds = [];
+    }
+    for (const rid of runIds) {
+      const p = join("runs", rid, "shared", "resolved-decisions.md");
+      if (existsSync(p) && readFileSync(p, "utf8").includes(id)) {
+        saw = true;
+        break;
+      }
+    }
+  } catch {
+    saw = false;
+  }
+  try {
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, `${author}.echo`), `${saw ? "SAW" : "MISSED"} ${id}\n`, "utf8");
+  } catch {
+    // best-effort: an echo failure must never crash a fixture.
+  }
+}
+
+/**
  * Resolve the body a fixture should emit, given its `author` and argv. Honors (in priority order):
  *   MAR_FAIL_ONCE (env)      → malformed body for the engine phase while the marker file exists
  *                              (resume fail-once mechanism, D-57)
@@ -235,6 +320,11 @@ function failOnceBody(author, args) {
 export function resolveEmitBody(author, args) {
   // Record the received prompt when echo mode is armed (gated-feedback test, no-op otherwise).
   maybeEchoPrompt(author, args);
+  // Record whether the resolved-decisions ledger is visible (D-62 inject test, no-op otherwise).
+  maybeEchoLedger(author);
+  // Re-litigation mode (D-64 enforce test): settle a fork in response, reopen it in integration.
+  const relit = relitigationBody(author, args);
+  if (relit !== undefined) return relit;
   const failOnce = failOnceBody(author, args);
   if (failOnce !== undefined) return failOnce;
   const malformedKind = flagValue(args, "--emit-malformed");

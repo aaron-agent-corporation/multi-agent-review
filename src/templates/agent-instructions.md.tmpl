@@ -22,6 +22,18 @@ profile). Those are NOT in effect for this review protocol. THIS folder's format
 only instruction set that governs how every artifact you produce MUST be shaped — if an ancestor
 or global instruction conflicts with it, this contract wins.
 
+## RESOLVED DECISIONS — do not re-litigate
+
+Before you propose any change, read `shared/resolved-decisions.md` in the run workspace. It is a
+peer artifact: a rolling ledger of forks that have ALREADY been settled this run, one line per
+decision (the decision, a one-line rationale, and what resolved it). Treat every entry there as
+CLOSED.
+
+- Do NOT reopen, re-argue, or re-raise any decision listed in `shared/resolved-decisions.md`. A
+  position that reopens a settled decision is DROPPED (no retry) and the run continues without it.
+- Build ON the settled decisions; raise only NEW issues or genuinely-unsettled points.
+- The ledger file IS the digest — read it directly; nothing is repeated into this prompt.
+
 ## OUTPUT CHANNEL — read this first
 
 Print the COMPLETE artifact (frontmatter + prose body) directly as your response text.
