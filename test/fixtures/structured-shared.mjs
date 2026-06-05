@@ -10,7 +10,29 @@
 // `--emit <kind>` / `--emit-malformed <kind>` flags drive the same generators directly for the
 // validation-retry test and the Task-3 verify command.
 
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+/**
+ * PROMPT-ECHO mechanism (PROT-05 gated-feedback test). When `MAR_ECHO_PROMPT_DIR` is set, append the
+ * full prompt argv this fixture received to `<dir>/<author>.log` (one line per invocation). The gated
+ * feedback test sets this dir then asserts the human steering note appears ONLY in the prompt for the
+ * phase AFTER the feedback boundary — proving the note reached exactly the next phase's prompt (D-51)
+ * and no other. A no-op when the env is unset, so every other test is unaffected.
+ */
+export function maybeEchoPrompt(author, args) {
+  const dir = process.env.MAR_ECHO_PROMPT_DIR;
+  if (!dir) return;
+  try {
+    mkdirSync(dir, { recursive: true });
+    // ONE physical line per invocation: flatten any newlines inside the prompt argv (the injected
+    // feedback steering block spans lines) so the test can analyze the prompt per-invocation.
+    const flat = args.join(" ").replace(/\r?\n/g, " ⏎ ");
+    appendFileSync(join(dir, `${author}.log`), `${flat}\n`, "utf8");
+  } catch {
+    // best-effort: an echo failure must never crash a fixture.
+  }
+}
 
 /** Extract the phase name from a `[phase:<name>]` prompt tag in argv, or undefined. */
 export function phaseFromArgs(args) {
@@ -211,6 +233,8 @@ function failOnceBody(author, args) {
  * Returns undefined when none apply (the caller falls through to its other modes).
  */
 export function resolveEmitBody(author, args) {
+  // Record the received prompt when echo mode is armed (gated-feedback test, no-op otherwise).
+  maybeEchoPrompt(author, args);
   const failOnce = failOnceBody(author, args);
   if (failOnce !== undefined) return failOnce;
   const malformedKind = flagValue(args, "--emit-malformed");
