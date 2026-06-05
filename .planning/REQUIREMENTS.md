@@ -22,8 +22,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **PROT-02**: Each turn produces a deterministically named artifact file in the run's workspace; the artifact trail is the authoritative run state
 - [x] **PROT-03**: Phase N+1 cannot start until all required phase-N artifacts exist
 - [x] **PROT-04**: During drafting, an agent's working context physically cannot include another agent's draft (scoped workspaces; drafts promoted to shared area only at the phase boundary)
-- [ ] **PROT-05**: User can choose per run: fully autonomous, or gated (run pauses for human approval at each phase boundary)
-- [ ] **PROT-06**: User can resume an interrupted run from the last completed phase without re-running prior phases
+- [x] **PROT-05**: User can choose per run: fully autonomous, or gated (run pauses for human approval at each phase boundary)
+- [x] **PROT-06**: User can resume an interrupted run from the last completed phase without re-running prior phases
 - [x] **PROT-07**: Run has an ID, status, and a manifest indexing all artifacts and phase completion
 
 ### Review Machinery
@@ -37,13 +37,13 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Disagreement Resolution
 
 - [x] **RSLV-01**: Disagreements are resolved by tiered mechanism: evidence-grounded integrator judgment (default), with every resolution logged with rationale
-- [ ] **RSLV-02**: For discrete forks (base selection, accept/reject), agents' positions are collected as a majority signal (3+ vendors) to inform or break ties
-- [ ] **RSLV-03**: Disagreements unresolvable on evidence and without clear majority are escalated as open decisions — pausing for human arbitration in gated mode, logged for review in autonomous mode
+- [x] **RSLV-02**: For discrete forks (base selection, accept/reject), agents' positions are collected as a majority signal (3+ vendors) to inform or break ties
+- [x] **RSLV-03**: Disagreements unresolvable on evidence and without clear majority are escalated as open decisions — pausing for human arbitration in gated mode, logged for review in autonomous mode
 
 ### Decision Record
 
 - [x] **RCRD-01**: Every run produces a decision record: resolved decisions with rationale, open decisions, and artifact lineage
-- [ ] **RCRD-02**: The resolved-decisions record is fed to later phases as a guard so settled decisions are not re-litigated within the run
+- [x] **RCRD-02**: The resolved-decisions record is fed to later phases as a guard so settled decisions are not re-litigated within the run
 
 ## v2 Requirements
 
@@ -104,11 +104,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REVW-05 | Phase 4 | Complete |
 | RSLV-01 | Phase 4 | Complete |
 | RCRD-01 | Phase 4 | Complete |
-| PROT-05 | Phase 5 | Pending |
-| PROT-06 | Phase 5 | Pending |
-| RSLV-02 | Phase 5 | Pending |
-| RSLV-03 | Phase 5 | Pending |
-| RCRD-02 | Phase 5 | Pending |
+| PROT-05 | Phase 5 | Complete |
+| PROT-06 | Phase 5 | Complete |
+| RSLV-02 | Phase 5 | Complete |
+| RSLV-03 | Phase 5 | Complete |
+| RCRD-02 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 23 total
