@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Adapter Layer + Roster + Pre-flight** - Swappable per-vendor adapters, configurable multi-vendor roster, and pre-run readiness checks (completed 2026-06-04)
 - [x] **Phase 3: Protocol Engine + Independence Enforcement** - 6-phase state machine with enforced turn-taking and structural draft independence (completed 2026-06-05)
 - [x] **Phase 4: First End-to-End Run** - One complete 3-agent run through all 6 phases producing a decision record (v1 success bar) (completed 2026-06-05)
-- [ ] **Phase 5: Hardening — Resume, Gating, Majority, Guards** - Resumable runs, configurable human gating, majority-signal tie-breaking, and re-litigation guards
+- [x] **Phase 5: Hardening — Resume, Gating, Majority, Guards** - Resumable runs, configurable human gating, majority-signal tie-breaking, and re-litigation guards (completed 2026-06-05)
 
 ## Phase Details
 
@@ -169,4 +169,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
 | 3. Protocol Engine + Independence Enforcement | 3/3 | Complete   | 2026-06-05 |
 | 4. First End-to-End Run | 5/5 | Complete   | 2026-06-05 |
-| 5. Hardening — Resume, Gating, Majority, Guards | 5/6 | In Progress|  |
+| 5. Hardening — Resume, Gating, Majority, Guards | 6/6 | Complete   | 2026-06-05 |
