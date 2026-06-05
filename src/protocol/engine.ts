@@ -16,11 +16,7 @@ import {
 import type { AgentEntry, MarConfig } from "../schema/config.js";
 import { EvaluationFrontmatter } from "../schema/evaluation.js";
 import { IntegrationFrontmatter } from "../schema/integration.js";
-import {
-  type Manifest,
-  RESUMABLE_STATUSES,
-  TERMINAL_DONE,
-} from "../schema/manifest.js";
+import { type Manifest, RESUMABLE_STATUSES, TERMINAL_DONE } from "../schema/manifest.js";
 import { ResponseFrontmatter } from "../schema/response.js";
 import { ReviewFrontmatter } from "../schema/review.js";
 import { isDone, writeArtifact } from "../workspace/artifacts.js";
@@ -778,7 +774,6 @@ type RevalidateResult = { ok: true } | { ok: false; error: string };
  */
 export async function revalidateForResume(
   runDir: string,
-  config: MarConfig,
   manifest: Manifest,
   roster: AgentEntry[],
   resumePhase: Phase,
@@ -863,7 +858,7 @@ export async function resumeProtocol(runDir: string, config: MarConfig): Promise
   const resumePhase = firstIncompletePhase(manifest, roster);
 
   // D-56: re-validate the completed-phase trail + roster preflight before continuing.
-  const check = await revalidateForResume(runDir, config, manifest, roster, resumePhase);
+  const check = await revalidateForResume(runDir, manifest, roster, resumePhase);
   if (!check.ok) {
     process.stderr.write(`${check.error}\n`);
     return 2;

@@ -17,10 +17,10 @@ import {
   withRetry,
 } from "./retry.js";
 import type { AgentEntry } from "./schema/config.js";
+import { RESUMABLE_STATUSES, TERMINAL_DONE } from "./schema/manifest.js";
 import { writeArtifact } from "./workspace/artifacts.js";
 import { artifactPath, newRunId, nextSeq, runDir as runDirFor } from "./workspace/layout.js";
 import { addArtifact, createRun, readManifest, setStatus } from "./workspace/manifest.js";
-import { RESUMABLE_STATUSES, TERMINAL_DONE } from "./schema/manifest.js";
 
 // WR-05: cap a prompt FILE read at 10 MB, matching claude's stdin cap (claude 2.1.128+). A
 // value larger than this is treated as an error rather than silently streamed to the model.
