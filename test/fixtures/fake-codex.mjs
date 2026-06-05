@@ -11,6 +11,9 @@
 //                      (the test injects a fresh temp dir), so the SAME fixture exercises the
 //                      transient-then-ok retry path across separate adapter spawns (D-25).
 //   --bad-json       → writes "not json" to stdout, exit 0 (no parseable terminal event)
+//   --emit <kind>    → happy NDJSON envelope, but the agent_message text is the kind-tagged
+//                      marker "codex:<kind>" so a multi-phase run yields distinct per-phase
+//                      artifacts while preserving the verified NDJSON shape. (additive.)
 //   --hang           → never exits (for timeout/kill tests)
 // The prompt is read from argv but is not required.
 
@@ -18,6 +21,12 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const args = process.argv.slice(2);
+
+/** Value following `--emit` (e.g. "draft"), or undefined when the flag is absent. */
+function emitKind() {
+  const i = args.indexOf("--emit");
+  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
+}
 
 /** Write one NDJSON event line to stdout. */
 function emit(obj) {
@@ -47,6 +56,24 @@ function emitHappy() {
 if (args.includes("--hang")) {
   // Never exit — lets a wall-clock timeout test kill us.
   setInterval(() => {}, 1e9);
+} else if (emitKind() !== undefined) {
+  // Per-phase marker mode: same verified NDJSON success sequence, agent_message tagged by kind.
+  emit({ type: "thread.started", thread_id: "019e941a-ok" });
+  emit({ type: "turn.started" });
+  emit({
+    type: "item.completed",
+    item: { id: "item_0", type: "agent_message", text: `codex:${emitKind()}` },
+  });
+  emit({
+    type: "turn.completed",
+    usage: {
+      input_tokens: 19484,
+      cached_input_tokens: 3456,
+      output_tokens: 20,
+      reasoning_output_tokens: 13,
+    },
+  });
+  process.exit(0);
 } else if (args.includes("--fail-auth")) {
   // Codex retries the endpoint internally before giving up — emit the 401 error a few times,
   // then the terminal turn.failed. exit 1.
