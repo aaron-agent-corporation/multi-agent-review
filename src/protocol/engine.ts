@@ -113,7 +113,9 @@ async function runPhase(
       // is also WRITTEN into that per-agent dir (`work/<agent>/`), so a peer can never read it from
       // a shared location until promoteDrafts copies it at the boundary. Non-scoped phases write
       // straight into the run dir (the shared workspace).
-      const cwd = phase.scoped ? await scopedWorkdir(runDir, entry.name, inputPath) : undefined;
+      const cwd = phase.scoped
+        ? await scopedWorkdir(runDir, entry.name, inputPath, entry.vendor)
+        : undefined;
       const artifactDir = cwd ?? runDir;
 
       const turn = await withRetry(

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import fsExtra from "fs-extra";
+import { type Vendor, seedInstructions } from "../protocol/instructions.js";
 import { isDone } from "./artifacts.js";
 import { artifactName } from "./layout.js";
 
@@ -30,21 +31,38 @@ export function draftFileName(agent: string): string {
 
 /**
  * Create an isolated per-agent draft working directory and return its path (PROT-04 — the
- * project's highest-stakes invariant). The dir is `runDir/work/<agent>/` and is seeded with ONLY
- * `input.md` (a copy of the document under review). It deliberately contains NO peer draft, so
- * `readdirSync` of one agent's workdir can never reveal another agent's draft — independence is a
- * filesystem fact, not a prompt request. The returned path is meant to be passed as the adapter's
- * scoped `cwd` for the draft phase.
+ * project's highest-stakes invariant). The dir is `runDir/work/<agent>/` and is seeded with
+ * `input.md` (a copy of the document under review) PLUS the agent's vendor-native instruction
+ * file (D-36/D-37 format contract). It deliberately contains NO peer draft, so `readdirSync` of
+ * one agent's workdir can never reveal another agent's draft — independence is a filesystem fact,
+ * not a prompt request. The returned path is meant to be passed as the adapter's scoped `cwd` for
+ * the draft phase.
+ *
+ * Ancestor-inheritance neutralization (Pitfall 1 / T-04-03): all three CLIs walk from the git
+ * project root down to cwd discovering instruction files, so this repo's own root instruction
+ * files would otherwise dilute the seeded format contract. The neutralization (RESEARCH option 3)
+ * relies on two facts proven by the spike test in test/instructions.test.ts:
+ *   1. The seeded vendor file lands in the agent's scoped cwd, making it the NEAREST instruction
+ *      file (codex/gemini honor the nearest; no ancestor AGENTS.md/GEMINI.md exists at this repo
+ *      root — only CLAUDE.md does), and
+ *   2. The live adapter path MUST pass each vendor's ancestor/global-suppression flag:
+ *      claude `--bare`; codex `--ignore-user-config`; gemini config-trust scoping
+ *      (folder-trust off / `--include-directories` limited to the scoped cwd).
+ * This keeps the seeded format contract the only instruction set in effect (success criterion #2).
  */
 export async function scopedWorkdir(
   runDir: string,
   agent: string,
   inputPath: string,
+  vendor: Vendor,
 ): Promise<string> {
   assertSafeAgent(agent);
   const dir = join(runDir, "work", agent);
   await ensureDir(dir);
   await copy(inputPath, join(dir, "input.md"));
+  // Seed the vendor-native instruction file alongside input.md so the format contract reaches the
+  // agent through its scoped cwd. assertSafeAgent above already contained the path under runDir.
+  await seedInstructions(dir, vendor);
   return dir;
 }
 
