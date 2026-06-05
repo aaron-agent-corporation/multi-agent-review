@@ -28,13 +28,13 @@ Differently-trained frontier models catch each other's blind spots — the syste
 
 - [x] Orchestrate 3+ vendor CLIs (Claude Code, Codex CLI, Gemini CLI) through the full 6-phase protocol — Validated in Phase 4: live 3-vendor run 20260605-MlhRzU
 - [ ] Shared workspace where agents read each other's artifacts directly (artifact-per-turn convention)
-- [ ] Encoded protocol with explicit turn-taking, artifact naming, and phase gates — no human judgment calls required for sequencing
+- [x] Encoded protocol with explicit turn-taking, artifact naming, and phase gates (PROT-01/03) — Validated in Phase 3; Phase 5 added gated/autonomous per-run choice
 - [ ] Independence enforcement: no agent sees another's draft before the cross-review phase
 - [x] Structured review format: numbered issues, severity, concrete questions (REVW-01) — Validated in Phase 4, system-validated with one-retry gate
 - [x] Response round distinct from merging: accept / reject with reason / refine (REVW-02) — Validated in Phase 4
 - [x] Single integrator designated after evaluation, integrator-only merge with per-addition verdicts (REVW-03/04/05) — Validated in Phase 4: convergence loop designates base author
-- [ ] Disagreement resolution mechanism (approach to be determined by research — majority vote, debate rounds, judge, and human escalation are candidates)
-- [ ] Configurable human involvement per run: fully autonomous OR gated at phase boundaries
+- [x] Disagreement resolution mechanism: evidence-grounded convergence loop + majority tie-break at cap/deadlock + human arbitration in gated mode (RSLV-01/02/03) — Validated in Phases 4-5
+- [x] Configurable human involvement per run: fully autonomous OR gated at phase boundaries with approve/abort/feedback + pause-and-exit (PROT-05) — Validated in Phase 5
 - [ ] Generic over document type — architecture docs, legal briefs, research memos are all just inputs
 - [x] Decision record output: resolved decisions, open decisions, artifact lineage preserved per run (RCRD-01, RSLV-01) — Validated in Phase 4
 - [x] A complete 3-agent run on a test document finishing all 6 phases with a decision record (v1 success bar) — Validated in Phase 4: LIVE 3-vendor checkpoint approved on run 20260605-MlhRzU
@@ -91,4 +91,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-05 after Phase 4 completion (First End-to-End Run — v1 success bar met: LIVE 3-vendor run through all 6 phases with validated structured artifacts, bounded convergence loop, single-integrator merge, and a contested-only decision record; verification passed 19/19)*
+*Last updated: 2026-06-05 after Phase 5 completion (Hardening — resume from last completed phase, gated/autonomous runs with feedback gates and human arbitration, majority tie-breaks, re-litigation guard via rolling resolved-decisions ledger; verification passed 27/27; final phase of v1.0)*
