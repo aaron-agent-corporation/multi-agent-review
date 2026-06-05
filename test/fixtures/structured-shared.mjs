@@ -27,11 +27,28 @@ export function flagValue(args, flag) {
 
 /**
  * The agent this fixture proposes as the integration base (EvaluationFrontmatter.proposedBase,
- * IntegrationFrontmatter.base). Steerable via MAR_EMIT_BASE so a convergence test (04-04) can make
- * every fixture agree on one base; defaults to the fixture's own author so an unsteered run is
- * still schema-valid.
+ * IntegrationFrontmatter.base). Resolution order (RSLV-02, Open Q3):
+ *   1. MAR_EMIT_BASES — a JSON map `{"<author>":"<base>", ...}`; when this author has an entry, use
+ *      it. This is the PER-AUTHOR steering the majority tests need: a 2-1 split is produced by mapping
+ *      different authors to different bases. A malformed/non-object value is ignored (falls through)
+ *      rather than throwing, so a bad env never crashes a fixture.
+ *   2. MAR_EMIT_BASE — the existing SINGLE shared base (04-04 convergence test): every fixture agrees
+ *      on one base. Honored only when MAR_EMIT_BASES did not map this author, so existing tests using
+ *      MAR_EMIT_BASE are unaffected.
+ *   3. the fixture's own author — so an unsteered run is still schema-valid.
  */
 export function proposedBase(author) {
+  const basesJson = process.env.MAR_EMIT_BASES;
+  if (basesJson) {
+    try {
+      const map = JSON.parse(basesJson);
+      if (map && typeof map === "object" && typeof map[author] === "string") {
+        return map[author];
+      }
+    } catch {
+      // malformed MAR_EMIT_BASES → ignore, fall through to MAR_EMIT_BASE / author
+    }
+  }
   return process.env.MAR_EMIT_BASE || author;
 }
 
