@@ -54,6 +54,9 @@ export function makeClaudeAdapter(bin = "claude", model?: string): AgentAdapter 
         // it removes any chance of a stdin-block and keeps all three adapters identical.
         stdin: "ignore",
         // No shell (execa passes argv as an array) — prompt cannot inject shell commands (T-01-05).
+        // PROT-04: scoped draft-phase cwd, conditionally spread LAST so the absent case spawns the
+        // EXACT same options as today (omit when unset → unchanged behavior).
+        ...(req.cwd ? { cwd: req.cwd } : {}),
       });
 
       const durationMs = result.durationMs ?? 0;
