@@ -169,4 +169,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
 | 3. Protocol Engine + Independence Enforcement | 3/3 | Complete   | 2026-06-05 |
 | 4. First End-to-End Run | 5/5 | Complete   | 2026-06-05 |
-| 5. Hardening — Resume, Gating, Majority, Guards | 4/6 | In Progress|  |
+| 5. Hardening — Resume, Gating, Majority, Guards | 5/6 | In Progress|  |
