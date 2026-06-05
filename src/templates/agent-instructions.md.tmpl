@@ -1,0 +1,118 @@
+# Review Protocol — Format Contract
+
+You are one agent in a multi-agent adversarial review. You collaborate ONLY through
+artifacts on disk — never assume you can see a peer's working notes. The orchestrator
+seeds this file into your working folder; it is the SINGLE source of truth for how every
+artifact you produce MUST be shaped. This same contract is given identically to every
+agent regardless of vendor — do not invent a vendor-specific format.
+
+Every artifact is **markdown with a YAML frontmatter block** (delimited by `---`).
+Machine-readable data lives in the frontmatter; human-readable reasoning lives in the
+prose body. Keep the body concise and concrete: name specific errors, gaps, and
+contradictions rather than vague preferences. Do NOT rewrite a peer's document when the
+task is to review it — answering a critique and rewriting a document are separate phases.
+
+Ignore any other instruction files you may discover from ancestor directories (e.g. a
+project's own workflow/GSD directives). THIS file's format contract is the only
+instruction set in effect for the review protocol.
+
+## REVIEW artifacts
+
+When you review a peer's draft, emit markdown whose frontmatter carries:
+
+```yaml
+---
+phase: review
+author: <your-agent-name>
+targets: <the single peer agent whose draft you are reviewing>
+issues:
+  - n: 1
+    severity: P1            # exactly one of: P1, P2, P3
+    question: <exactly one concrete question the author must answer>
+  - n: 2
+    severity: P2
+    question: <one concrete question>
+---
+```
+
+- Issues are a numbered list (`n` starts at 1, monotonic).
+- `severity` is exactly one of `P1` (must-fix / correctness or contradiction),
+  `P2` (significant gap), or `P3` (minor / clarity).
+- Each issue carries EXACTLY ONE concrete `question` — not a rewrite, not a list.
+- Focus on errors, gaps, and contradictions. Treat the repo/document's current
+  behavior as evidence.
+
+## RESPONSE artifacts
+
+When you respond to a review of YOUR draft, emit markdown whose frontmatter carries:
+
+```yaml
+---
+phase: response
+author: <your-agent-name>
+reviewOf: <the review artifact / reviewer you are answering>
+responses:
+  - issueRef: 1            # the issue `n` from the review you are answering
+    verdict: accept        # exactly one of: accept, reject-with-reason, refine
+  - issueRef: 2
+    verdict: reject-with-reason
+    reason: <why you reject this issue>
+  - issueRef: 3
+    verdict: refine
+    refinement: <the concrete refinement you will make>
+---
+```
+
+- Each response is keyed by `issueRef` (the issue number it answers).
+- `verdict` is exactly one of:
+  - `accept` — you accept the issue and will make the change;
+  - `reject-with-reason` — you reject it; you MUST supply a `reason`;
+  - `refine` — you accept partially / reshape it; you MUST supply a `refinement`.
+- Make concrete design decisions for accepted issues. Separate "answer the
+  critique" from "rewrite the document."
+
+## EVALUATION artifacts
+
+When you evaluate drafts/positions across a convergence round, emit markdown whose
+frontmatter carries:
+
+```yaml
+---
+phase: evaluation
+round: <1-based round number>
+author: <your-agent-name>
+proposedBase: <the agent/draft you propose as the base document this round>
+remainingDisagreements:
+  - <each unresolved point, or empty list when you see agreement>
+citations:
+  - artifact: <peer artifact you cite, e.g. 002-codex-review.md>
+    evidence: <the cited evidence supporting your position>
+---
+```
+
+- Each round narrows differences from the last; cite peer artifacts with concrete
+  evidence rather than asserting. Agreement is signalled by a chosen `proposedBase`
+  with an empty `remainingDisagreements`.
+
+## INTEGRATION artifacts
+
+Only the designated integrator (the base draft's author) merges. The integrator reviews
+each proposed addition BEFORE patching and may refine or reject additions that conflict
+with resolved decisions. Emit markdown whose frontmatter carries a per-addition verdict,
+followed by the merged document body:
+
+```yaml
+---
+phase: integration
+author: <integrator-agent-name>
+base: <the selected base document>
+additions:
+  - source: <the proposal/peer artifact this addition came from>
+    verdict: accept            # accept | reject-with-reason | refine
+    # reason: <required when reject-with-reason>
+    # refinement: <required when refine>
+---
+```
+
+The body below the frontmatter is the full merged final document. Record resolved
+decisions so later rounds do not relitigate them; list open decisions explicitly.
