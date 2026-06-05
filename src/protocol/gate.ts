@@ -13,11 +13,14 @@ import type { Phase } from "./phases.js";
  * of its own, so it can never check an unwritten path (no false pass/fail). It calls `isDone`
  * (exists AND size>0), never a bare existence check, so a 0-byte artifact fails (Pitfall 3).
  *
- * Empty list -> vacuously true: the engine guarantees a non-empty written-paths array for any
- * non-empty roster, so an empty list only occurs for a participant-less phase, which Phase 3
- * never produces.
+ * Empty list -> FALSE (WR-03, fails closed). `[].every(...)` is vacuously true, which would let a
+ * degenerate zero-survivor / zero-written-path phase satisfy the gate (`true && 0 === 0`) and
+ * advance an agent-less run. The engine SHOULD never hand this gate an empty list, but the gate no
+ * longer relies on that upstream ordering invariant — a zero-survivor phase fails the gate here
+ * rather than vacuously passing.
  */
 export function requiredArtifactsExist(writtenPaths: string[]): boolean {
+  if (writtenPaths.length === 0) return false; // WR-03: zero survivors must not pass the gate
   return writtenPaths.every((p) => isDone(p));
 }
 

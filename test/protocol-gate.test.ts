@@ -73,11 +73,11 @@ describe("requiredArtifactsExist", () => {
     expect(requiredArtifactsExist([full, empty])).toBe(false);
   });
 
-  it("returns true for an empty list (vacuous)", () => {
-    // The engine guarantees a non-empty written-paths array for any non-empty roster, so an
-    // empty list only occurs for a phase with no participants — which the engine never produces
-    // in Phase 3. `[].every(...)` is vacuously true; documenting the contract here.
-    expect(requiredArtifactsExist([])).toBe(true);
+  it("WR-03: returns FALSE for an empty list (fails closed, not vacuously true)", () => {
+    // A zero-survivor / zero-written-path phase must NOT satisfy the gate. `[].every(...)` would be
+    // vacuously true and let an agent-less run advance (`true && 0 === 0`); the explicit non-empty
+    // guard makes a degenerate empty phase fail closed.
+    expect(requiredArtifactsExist([])).toBe(false);
   });
 });
 

@@ -271,6 +271,8 @@ async function runPhaseGated(
 
   // The artifacts gate over EXACTLY the survivors' written paths (gated == written). The expected
   // count is the SURVIVING roster's participant count, so a survivor short-write fails the gate.
+  // WR-03: requiredArtifactsExist now fails closed on an empty list, so a degenerate zero-survivor
+  // phase (writtenPaths == []) fails here rather than vacuously passing as `true && 0 === 0`.
   const passes =
     requiredArtifactsExist(writtenPaths) &&
     writtenPaths.length === expectedParticipantCount(phase, survivors);
