@@ -19,6 +19,36 @@ function buildArgv(promptText: string, model?: string): string[] {
   return a;
 }
 
+/** Max length of any stderr-derived error string surfaced past this adapter (WR-04, Phase 3). */
+const MAX_ERROR_LEN = 500;
+// C0 control chars (U+0000-U+001F) + DEL — stripped so a raw stderr blob can't break the artifact
+// frontmatter or smear the console (consistent with artifacts.ts).
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately stripping control chars.
+const ERROR_CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
+
+/**
+ * Bound + sanitize a raw stderr blob before it leaves the adapter (WR-04, Phase 3). gemini's
+ * failure-path stderr is arbitrary, unbounded vendor content and must NOT flow verbatim into the
+ * TurnResult `error` (which is persisted in the artifact and printed to the console). Flatten
+ * newlines, strip control chars, and truncate to {@link MAX_ERROR_LEN}.
+ */
+function boundStderr(stderr: string): string {
+  const flattened = stderr.replace(/\r?\n/g, " ").replace(ERROR_CONTROL_CHARS, "").trim();
+  return flattened.length > MAX_ERROR_LEN ? `${flattened.slice(0, MAX_ERROR_LEN)}…` : flattened;
+}
+
+/**
+ * Compose the gemini error string for a failed turn (WR-03 + WR-04, Phase 3). Prefer the
+ * structured `j.error?.message`; otherwise fall back to a BOUNDED, sanitized stderr; otherwise a
+ * generic constant. `||` (not `??`) treats an empty string as missing so a failed turn never
+ * surfaces `error: ""` (WR-03). The stderr fallback is bounded + control-char-stripped so raw,
+ * unbounded vendor stderr can never flow unredacted into the artifact/log/console (WR-04).
+ */
+function sanitizeGeminiError(message: string | undefined, stderr: string): string {
+  const bounded = boundStderr(stderr);
+  return (message && message.trim()) || bounded || "gemini error";
+}
+
 /**
  * Create a gemini {@link AgentAdapter}. Gemini is FIXTURE-BUILT (D-32): real gemini headless auth
  * is broken on this machine, so this adapter is built/tested ENTIRELY against fake-gemini.mjs and
@@ -87,7 +117,8 @@ export function makeGeminiAdapter(bin = "gemini", model?: string): AgentAdapter 
           durationMs,
           timedOut: false,
           redactedCommand,
-          error: `unparseable output: ${result.stderr || "no json"}`,
+          // WR-04 (Phase 3): bound + sanitize the raw stderr before it leaves the adapter.
+          error: `unparseable output: ${boundStderr(result.stderr) || "no json"}`,
         };
       }
 
@@ -104,7 +135,10 @@ export function makeGeminiAdapter(bin = "gemini", model?: string): AgentAdapter 
         timedOut: false,
         redactedCommand,
         sessionId: j.session_id,
-        error: ok ? undefined : (j.error?.message ?? result.stderr ?? "gemini error"),
+        // WR-03: use `||` (not `??`) so an empty-string stderr/message falls through to the generic
+        // fallback instead of surfacing `error: ""`. An empty error degrades the human progress line
+        // (`()`) and weakens retry classification.
+        error: ok ? undefined : sanitizeGeminiError(j.error?.message, result.stderr),
       };
     },
   };
