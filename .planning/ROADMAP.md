@@ -127,8 +127,8 @@ Plans:
 Plans:
 **Wave 1** *(parallel — disjoint files)*
 
-- [ ] 04-01-PLAN.md — gray-matter install checkpoint + review/response/evaluation/decision-record zod schemas + tests (REVW-01/02/03, RCRD-01, RSLV-01)
-- [ ] 04-02-PLAN.md — format-contract template + per-vendor instruction-file seeding + Pitfall-1 ancestor-inheritance neutralization spike (REVW-01/02, D-37)
+- [x] 04-01-PLAN.md — gray-matter install checkpoint + review/response/evaluation/decision-record zod schemas + tests (REVW-01/02/03, RCRD-01, RSLV-01)
+- [x] 04-02-PLAN.md — format-contract template + per-vendor instruction-file seeding + Pitfall-1 ancestor-inheritance neutralization spike (REVW-01/02, D-37)
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -168,5 +168,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
 | 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
 | 3. Protocol Engine + Independence Enforcement | 3/3 | Complete   | 2026-06-05 |
-| 4. First End-to-End Run | 0/5 | Not started | - |
+| 4. First End-to-End Run | 2/5 | In Progress|  |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |
