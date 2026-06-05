@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { assign, createActor, fromPromise, setup, toPromise } from "xstate";
 import { makeAdapter } from "../adapters/registry.js";
+import { applySkipFailed } from "../gates.js";
 import { logInvocation } from "../log/invocation.js";
 import {
   type Classify,
@@ -12,7 +13,7 @@ import {
 import type { AgentEntry, MarConfig } from "../schema/config.js";
 import { writeArtifact } from "../workspace/artifacts.js";
 import { nextSeq } from "../workspace/layout.js";
-import { addArtifact, readManifest, setStatus } from "../workspace/manifest.js";
+import { addArtifact, addDroppedAgent, readManifest, setStatus } from "../workspace/manifest.js";
 import { promoteDrafts, scopedWorkdir } from "../workspace/scope.js";
 import { expectedParticipantCount, requiredArtifactsExist } from "./gate.js";
 import { PHASES, type Phase } from "./phases.js";
@@ -31,16 +32,37 @@ interface ProtocolInput {
   inputPath: string;
 }
 
+/** A roster agent that failed its turn in a phase, with the reason for the audit log. */
+interface FailedAgent {
+  entry: AgentEntry;
+  reason: string;
+}
+
 /**
- * Run ONE phase: fan the roster out N-wide with a bare settle-all (allSettled — never the
- * reject-fast variant, Pitfall 5; no concurrency-limiter dependency per the concurrency decision),
- * reuse the proven turn seam unchanged, and RESOLVE WITH the exact array of artifact paths actually
- * written. That `writtenPaths` array is the SINGLE SOURCE OF TRUTH the phase gate consumes — no
- * seq/path is recomputed anywhere else.
+ * What ONE phase produced: the exact paths the fan-out wrote (the gate's single source of truth),
+ * plus the partition of the CURRENT roster into the agents that succeeded and those that failed.
+ * The engine uses ok/failed to apply partial-failure handling (D-30) and shrink the live roster.
  */
-async function runPhase(phase: Phase, input: ProtocolInput): Promise<string[]> {
+interface PhaseResult {
+  writtenPaths: string[];
+  ok: AgentEntry[];
+  failed: FailedAgent[];
+}
+
+/**
+ * Run ONE phase over `roster` (the LIVE surviving roster, which may be smaller than the configured
+ * one after earlier drops): fan out N-wide with a bare settle-all (allSettled — never the
+ * reject-fast variant, Pitfall 5; no concurrency-limiter dependency per the concurrency decision),
+ * reuse the proven turn seam unchanged, and return BOTH the exact array of artifact paths actually
+ * written AND the ok/failed partition of `roster`. `writtenPaths` is the SINGLE SOURCE OF TRUTH the
+ * phase gate consumes; ok/failed drives the partial-failure handler in {@link runPhaseGated}.
+ */
+async function runPhase(
+  phase: Phase,
+  roster: AgentEntry[],
+  input: ProtocolInput,
+): Promise<PhaseResult> {
   const { runDir, config, inputPath } = input;
-  const roster = config.agents;
   const timeoutMs = config.defaults.timeoutMs;
   const retries = config.defaults.retries;
 
@@ -74,9 +96,13 @@ async function runPhase(phase: Phase, input: ProtocolInput): Promise<string[]> {
     agent: string;
     seq: number;
   }
+  // Per-agent outcome: either a written artifact (ok) or a failure reason (dropped from the run).
+  type AgentOutcome =
+    | { entry: AgentEntry; written: WrittenArtifact }
+    | { entry: AgentEntry; failure: string };
 
   const settled = await Promise.allSettled(
-    roster.map(async (entry, index): Promise<WrittenArtifact | null> => {
+    roster.map(async (entry, index): Promise<AgentOutcome> => {
       const seq = seqFor(index);
       const adapter = makeAdapter(entry.vendor, entry.bin, entry.model);
       // Minimal placeholder prompt — structured per-phase CONTENT is Phase 4 (RESEARCH A4); a
@@ -119,7 +145,7 @@ async function runPhase(phase: Phase, input: ProtocolInput): Promise<string[]> {
       if (!turn.ok) {
         const reason = turn.timedOut ? "timeout" : (turn.error ?? "failed");
         process.stdout.write(`  ${entry.name} ✗  ${secs}s  (${reason})\n`);
-        return null;
+        return { entry, failure: reason };
       }
 
       const written = await writeArtifact(artifactDir, seq, entry.name, {
@@ -131,17 +157,28 @@ async function runPhase(phase: Phase, input: ProtocolInput): Promise<string[]> {
       // Manifest path is ALWAYS relative to the run dir (scoped drafts live under work/<agent>/).
       const relPath = written.path.slice(runDir.length + 1);
       process.stdout.write(`  ${entry.name} ✓  ${secs}s  → ${relPath}\n`);
-      return { absPath: written.path, relPath, agent: entry.name, seq };
+      return { entry, written: { absPath: written.path, relPath, agent: entry.name, seq } };
     }),
   );
 
-  // Index every written artifact into the manifest SEQUENTIALLY (no concurrent manifest writes).
-  // Collect ONLY the paths actually written (one per ok turn). A rejected/failed turn contributes
-  // nothing — the gate then sees a short write.
+  // Index every written artifact into the manifest SEQUENTIALLY (no concurrent manifest writes) and
+  // partition the roster into ok/failed. A rejected promise (the fan-out itself threw — should not
+  // happen, but allSettled tolerates it) counts as a failure with the rejection reason.
   const writtenPaths: string[] = [];
-  for (const r of settled) {
-    if (r.status !== "fulfilled" || !r.value) continue;
-    const { absPath, relPath, agent, seq } = r.value;
+  const ok: AgentEntry[] = [];
+  const failed: FailedAgent[] = [];
+  for (let i = 0; i < settled.length; i++) {
+    const r = settled[i];
+    if (r.status === "rejected") {
+      failed.push({ entry: roster[i], reason: String(r.reason ?? "rejected") });
+      continue;
+    }
+    const outcome = r.value;
+    if ("failure" in outcome) {
+      failed.push({ entry: outcome.entry, reason: outcome.failure });
+      continue;
+    }
+    const { absPath, relPath, agent, seq } = outcome.written;
     await addArtifact(runDir, {
       path: relPath,
       agent,
@@ -150,49 +187,99 @@ async function runPhase(phase: Phase, input: ProtocolInput): Promise<string[]> {
       createdAt: new Date().toISOString(),
     });
     writtenPaths.push(absPath);
+    ok.push(outcome.entry);
   }
-  return writtenPaths;
+  return { writtenPaths, ok, failed };
+}
+
+/**
+ * Run a phase AND decide its outcome, applying partial-failure handling (D-30) and the artifacts
+ * gate (PROT-03) together. Returns the surviving roster to carry into the next phase, or `null` to
+ * fail the run. Steps:
+ *
+ *   1. Fan out over the current roster (runPhase) → writtenPaths + ok/failed partition.
+ *   2. If any agent failed, apply `applySkipFailed(survivors, failed)`. It re-asserts the
+ *      >=2-distinct-vendor invariant over the SURVIVORS, so dropping can never silently produce a
+ *      single-vendor run. If it throws, the run fails (return null). Each dropped agent is recorded
+ *      in the manifest's audit list (never a silent drop).
+ *   3. Gate the phase on EXACTLY the survivors' written paths: every path isDone AND the written
+ *      count equals the expected participant count for the SURVIVING roster (so a survivor that
+ *      claimed success but wrote a short/0-byte artifact still fails the gate, PROT-03 / Pitfall 3).
+ *
+ * The roster shrinks monotonically across phases: an agent dropped in draft never participates in
+ * review, and the gate/expected-count always reflect the live surviving roster.
+ */
+async function runPhaseGated(
+  phase: Phase,
+  roster: AgentEntry[],
+  input: ProtocolInput,
+): Promise<AgentEntry[] | null> {
+  const { writtenPaths, ok, failed } = await runPhase(phase, roster, input);
+
+  // Partial-failure handling: drop the failed agents, but only if >=2 distinct vendors survive.
+  let survivors = ok;
+  if (failed.length > 0) {
+    try {
+      survivors = applySkipFailed(
+        ok,
+        failed.map((f) => f.entry),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stdout.write(`  ✗ cannot continue: ${msg}\n`);
+      return null;
+    }
+    // Record each drop in the manifest audit trail (sequential — outside any fan-out).
+    for (const f of failed) {
+      process.stdout.write(`  ⤵ dropping ${f.entry.name} (${f.entry.vendor}): ${f.reason}\n`);
+      await addDroppedAgent(input.runDir, {
+        agent: f.entry.name,
+        vendor: f.entry.vendor,
+        phase: phase.name,
+        reason: f.reason,
+        droppedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  // The artifacts gate over EXACTLY the survivors' written paths (gated == written). The expected
+  // count is the SURVIVING roster's participant count, so a survivor short-write fails the gate.
+  const passes =
+    requiredArtifactsExist(writtenPaths) &&
+    writtenPaths.length === expectedParticipantCount(phase, survivors);
+  return passes ? survivors : null;
 }
 
 interface ProtocolContext {
   input: ProtocolInput;
-  /** Paths the most recent phase fan-out actually wrote (the gate's single source of truth). */
-  writtenPaths: string[];
+  /** The LIVE surviving roster, shrinking as agents are dropped (D-30). */
+  roster: AgentEntry[];
 }
 
-type PhaseEvent = { output: string[] };
+/** A phase actor resolves with the surviving roster (continue) or null (fail the run). */
+type PhaseEvent = { output: AgentEntry[] | null };
 
 /**
- * The phase gate guard, as a pure predicate over the actor's resolved `writtenPaths`: every
- * written artifact must be isDone AND the writer count must match the expected participant count
- * (so a failed/short-writing agent fails the gate). The gate input is EXACTLY the fan-out's
- * written paths — no seq/path is recomputed.
- */
-function phasePasses(roster: AgentEntry[], phase: Phase, writtenPaths: string[]): boolean {
-  return (
-    requiredArtifactsExist(writtenPaths) &&
-    writtenPaths.length === expectedParticipantCount(phase, roster)
-  );
-}
-
-/**
- * The 6-phase protocol as an XState v5 machine. Each phase is a state that invokes a
- * `fromPromise` fan-out actor (resolving with the written paths); a guard then checks the gate
- * over EXACTLY those paths plus the expected writer count before advancing. The draft state runs
+ * The 6-phase protocol as an XState v5 machine. Each phase is a state that invokes a `fromPromise`
+ * actor running {@link runPhaseGated} over the LIVE roster; the actor resolves with the surviving
+ * roster (continue) or null (fail). A guard advances only on a non-null survivor set and assigns it
+ * to context so the next phase fans out over the shrunken roster. The draft state runs
  * `promoteDrafts` (PROT-04 boundary) as a dedicated awaited actor in a transient `promote` state
- * placed BETWEEN draft and review. On any gate failure the machine routes to a `failed` final
- * state; on all 6 passing, to `done`. Terminal `setStatus` is applied by {@link runProtocol} off
- * the resolved final state so no async action races the manifest write.
+ * placed BETWEEN draft and review, promoting ONLY the surviving drafters. On any failure the
+ * machine routes to a `failed` final state; on all 6 passing, to `done`. Terminal `setStatus` is
+ * applied by {@link runProtocol} off the resolved final state so no async action races the manifest.
  */
 function buildMachine() {
-  const phaseActor = fromPromise<string[], { phase: Phase; input: ProtocolInput }>(({ input }) =>
-    runPhase(input.phase, input.input),
-  );
-  const promoteActor = fromPromise<void, { input: ProtocolInput }>(({ input }) =>
-    promoteDrafts(
-      input.input.runDir,
-      input.input.config.agents.map((a) => a.name),
-    ),
+  const phaseActor = fromPromise<
+    AgentEntry[] | null,
+    { phase: Phase; roster: AgentEntry[]; input: ProtocolInput }
+  >(({ input }) => runPhaseGated(input.phase, input.roster, input.input));
+  const promoteActor = fromPromise<void, { roster: AgentEntry[]; input: ProtocolInput }>(
+    ({ input }) =>
+      promoteDrafts(
+        input.input.runDir,
+        input.roster.map((a) => a.name),
+      ),
   );
 
   // Build the per-phase states programmatically so the 6-phase series stays in lock-step with
@@ -206,14 +293,17 @@ function buildMachine() {
     states[phase.name] = {
       invoke: {
         src: "phaseActor",
-        input: ({ context }: { context: ProtocolContext }) => ({ phase, input: context.input }),
+        input: ({ context }: { context: ProtocolContext }) => ({
+          phase,
+          roster: context.roster,
+          input: context.input,
+        }),
         onDone: [
           {
-            guard: ({ context, event }: { context: ProtocolContext; event: PhaseEvent }) =>
-              phasePasses(context.input.config.agents, phase, event.output),
+            guard: ({ event }: { event: PhaseEvent }) => event.output !== null,
             target: next,
             actions: assign({
-              writtenPaths: ({ event }: { event: PhaseEvent }) => event.output,
+              roster: ({ event }: { event: PhaseEvent }) => event.output as AgentEntry[],
             }),
           },
           { target: "failed" },
@@ -223,11 +313,15 @@ function buildMachine() {
     };
   }
 
-  // Transient state: promote drafts to shared/ at the draft->review boundary, THEN enter review.
+  // Transient state: promote the SURVIVING drafters' drafts to shared/ at the draft->review
+  // boundary, THEN enter review.
   states.promote = {
     invoke: {
       src: "promoteActor",
-      input: ({ context }: { context: ProtocolContext }) => ({ input: context.input }),
+      input: ({ context }: { context: ProtocolContext }) => ({
+        roster: context.roster,
+        input: context.input,
+      }),
       onDone: { target: "review" },
       onError: { target: "failed" },
     },
@@ -242,14 +336,14 @@ function buildMachine() {
   }).createMachine({
     id: "protocol",
     initial: PHASES[0].name,
-    context: ({ input }) => ({ input, writtenPaths: [] }),
+    context: ({ input }) => ({ input, roster: input.config.agents }),
     states: states as never,
   });
 }
 
 /**
  * Drive an input document through the 6-phase review protocol. Returns 0 when the run completes,
- * non-zero when a phase gate fails. PROT-01/03/04.
+ * non-zero when a phase gate fails or survivors drop below 2 distinct vendors. PROT-01/03/04, D-30.
  */
 export async function runProtocol(
   runDir: string,

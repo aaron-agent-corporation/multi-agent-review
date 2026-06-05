@@ -111,9 +111,10 @@ it("draft phase scopes each agent's cwd; drafts promoted to shared/ only after d
   expect(shared).toContain("001-codex-draft.md");
 });
 
-it("a missing/short draft fails the gate -> status failed, non-zero, does NOT advance", async () => {
-  // codex points at a non-existent binary (cli-roster precedent): the turn fails, no artifact
-  // is written for codex in the draft phase, so only the survivor's path is collected.
+it("a failed agent leaving <2 distinct vendors fails the run -> status failed, does NOT advance", async () => {
+  // Two agents, codex points at a non-existent binary: its turn fails, leaving only claude — a
+  // SINGLE distinct vendor. applySkipFailed re-asserts the >=2-distinct-vendor invariant over the
+  // survivors and throws, so the run fails (dropping must NEVER produce a single-vendor review).
   const config = baseConfig([
     { name: "claude", vendor: "claude", bin: `node ${fakeClaude}` },
     { name: "codex", vendor: "codex", bin: "/nonexistent/definitely-not-here-xyz" },
@@ -130,20 +131,38 @@ it("a missing/short draft fails the gate -> status failed, non-zero, does NOT ad
   expect(kinds).not.toContain("review");
 });
 
-it("one agent failing does not reject the whole fan-out (allSettled semantics)", async () => {
-  // Three agents: gemini fails, claude+codex succeed. The draft phase still records 2 survivors
-  // (allSettled never throws), then the gate decides (short write vs expected 3 -> failed).
+it("D-30 skip-failed: a draft-phase failure with >=2 survivors completes on the surviving roster", async () => {
+  // Three agents: gemini fails (its bin does not exist), claude+codex succeed. applySkipFailed
+  // drops gemini (2 distinct vendors survive), the run advances, and ALL 6 phases complete over
+  // the surviving 2-agent roster. This is the live-checkpoint defect fixed: a headless-auth gemini
+  // failure must no longer doom the whole run.
   const config = baseConfig([
     { name: "claude", vendor: "claude", bin: `node ${fakeClaude}` },
     { name: "codex", vendor: "codex", bin: `node ${fakeCodex}` },
     { name: "gemini", vendor: "gemini", bin: "/nonexistent/definitely-not-here-xyz" },
   ]);
 
-  // Should resolve (not throw) and end failed because only 2 of 3 expected drafts were written.
   const exit = await runProtocol(runDir, config, inputPath);
-  expect(exit).not.toBe(0);
+  expect(exit).toBe(0);
 
   const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
-  expect(manifest.status).toBe("failed");
-  expect(manifest.artifacts.filter((a: { kind: string }) => a.kind === "draft").length).toBe(2);
+  expect(manifest.status).toBe("completed");
+
+  // The drop is recorded in the audit trail (never silent): gemini, in the draft phase.
+  expect(manifest.droppedAgents.length).toBe(1);
+  expect(manifest.droppedAgents[0].agent).toBe("gemini");
+  expect(manifest.droppedAgents[0].vendor).toBe("gemini");
+  expect(manifest.droppedAgents[0].phase).toBe("draft");
+
+  // All 6 kinds present, exactly 2 per kind (the surviving roster) — gemini never appears.
+  const kinds = manifest.artifacts.map((a: { kind: string }) => a.kind);
+  for (const phase of PHASE_KINDS) {
+    expect(kinds.filter((k: string) => k === phase).length).toBe(2);
+  }
+  expect(manifest.artifacts.length).toBe(12);
+  expect(manifest.artifacts.some((a: { agent: string }) => a.agent === "gemini")).toBe(false);
+  // gemini's draft was never promoted to shared/ (only the 2 survivors').
+  const shared = readdirSync(join(runDir, "shared"));
+  expect(shared).not.toContain("001-gemini-draft.md");
+  expect(shared.filter((n: string) => n.endsWith("-draft.md")).length).toBe(2);
 });

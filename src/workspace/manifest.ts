@@ -1,6 +1,11 @@
 import { join } from "node:path";
 import fsExtra from "fs-extra";
-import { Manifest, type ManifestArtifact, type ManifestStatus } from "../schema/manifest.js";
+import {
+  type DroppedAgent,
+  Manifest,
+  type ManifestArtifact,
+  type ManifestStatus,
+} from "../schema/manifest.js";
 
 const { ensureDir, readFile, rename, writeFile } = fsExtra;
 
@@ -31,6 +36,7 @@ export async function createRun(opts: CreateRunOptions): Promise<Manifest> {
     updatedAt: now,
     cliVersions: opts.cliVersions ?? {},
     artifacts: [],
+    droppedAgents: [],
   };
   await writeManifestAtomic(opts.runDir, manifest);
   return manifest;
@@ -71,6 +77,22 @@ export async function addArtifact(runDir: string, entry: ManifestArtifact): Prom
 export async function setStatus(runDir: string, status: ManifestStatus): Promise<Manifest> {
   const current = await readManifest(runDir);
   const next: Manifest = { ...current, status, updatedAt: new Date().toISOString() };
+  await writeManifestAtomic(runDir, next);
+  return next;
+}
+
+/**
+ * Record an agent dropped mid-run by partial-failure handling (D-30). Appended to the manifest's
+ * `droppedAgents` audit list so the smaller surviving roster is explained, never silent. Sequential
+ * (read-modify-write) like {@link addArtifact} — callers must invoke it OUTSIDE a concurrent fan-out.
+ */
+export async function addDroppedAgent(runDir: string, entry: DroppedAgent): Promise<Manifest> {
+  const current = await readManifest(runDir);
+  const next: Manifest = {
+    ...current,
+    updatedAt: new Date().toISOString(),
+    droppedAgents: [...current.droppedAgents, entry],
+  };
   await writeManifestAtomic(runDir, next);
   return next;
 }
