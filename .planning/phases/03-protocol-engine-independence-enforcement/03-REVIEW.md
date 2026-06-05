@@ -33,8 +33,14 @@ status: issues_found
 fixed:
   - CR-01
   - CR-02
+  - WR-01
+  - WR-02
+  - WR-03
+  - WR-04
+  - WR-05
+  - WR-06
 fixed_at: 2026-06-04T00:00:00Z
-fixed_note: "Both criticals fixed (criticals-first). Warnings WR-01..06 and Info IN-01..04 remain open."
+fixed_note: "Both criticals + all 6 warnings fixed (Critical+Warning scope). Info IN-01..04 remain open by scope. Full gate green: 213 tests pass, tsc clean, biome clean on touched files."
 ---
 
 # Phase 3: Code Review Report
@@ -91,11 +97,15 @@ Additionally, thread per-agent `timedOut` outcomes into a distinct run status pa
 
 ### WR-01: Manifest read-modify-write is lost-update-racy across processes sharing a runDir
 
+**Status:** FIXED (commit fffd91d) — `addArtifact`, `setStatus`, and `addDroppedAgent` now run inside a per-runDir in-process promise-chain (`serializeWrite`), so overlapping read-modify-write cycles in the same process can no longer clobber each other. Fixed proportionately for the current single-process engine (no file-locking infra built); the in-process-only limitation and the unsupported multi-process-writer case are documented in the code. Regression test fires 12 concurrent `addArtifact` calls and asserts all 12 entries survive.
+
 **File:** `src/workspace/manifest.ts:55-98`
 **Issue:** `addArtifact`, `setStatus`, and `addDroppedAgent` each do `readManifest` → spread → `writeManifestAtomic`. The atomic rename only guarantees no *torn* file, not serializability. The tmp path is `${finalPath}.tmp-${process.pid}` — process-scoped, so two processes operating on the same run (e.g. a `mar invoke --run <id>` appended while a `mar run` over the same dir is mid-flight, or any future concurrency) will each read the same base, append their own entry, and the second rename clobbers the first — a silently lost artifact/dropped-agent record. The engine serializes its own writes, so this is not triggered in the single-process happy path, but the code presents itself as a durable audit trail and the guarantee does not hold under concurrent writers.
 **Fix:** Document the single-writer constraint explicitly, or guard with an O_EXCL lock file / advisory lock around the read-modify-write, or include a monotonic `version` field checked-and-incremented to detect a lost update and retry.
 
 ### WR-02: `promoteDrafts` copy of a missing draft throws an uncaught error that routes to `failed` with no audit reason
+
+**Status:** FIXED (commit e94a39b) — `promoteDrafts` now verifies each source with `isDone` before copy and throws a descriptive error naming the agent + path (instead of an opaque `fsExtra.copy` ENOENT). The engine's existing `promote` `onError` (`failureFromError("draft->review promotion failed", ...)`, the CR-01 path) threads that message into the manifest `failureReason` and stderr. Regression tests cover a missing source and a 0-byte source.
 
 **File:** `src/workspace/scope.ts:56-64`, `src/protocol/engine.ts:277-283,318-328`
 **Issue:** `promoteDrafts` copies `runDir/work/<agent>/<draftFileName>` for each surviving agent. If a survivor passed the gate (wrote a non-empty draft into its scoped dir) but the file is subsequently absent/renamed, `fsExtra.copy` rejects, the `promoteActor` errors, and the machine routes to `failed` via `onError`. No `droppedAgents` entry and no diagnostic is recorded — the run dies with status `failed` and the operator cannot tell promotion was the cause. The gate checks the *written* abs paths, but those live under `work/<agent>/`; promotion re-derives the source path independently via `draftFileName`, so the gate's source-of-truth guarantee does not cover the promotion source.
@@ -103,11 +113,15 @@ Additionally, thread per-agent `timedOut` outcomes into a distinct run status pa
 
 ### WR-03: `requiredArtifactsExist([])` returns `true` (vacuous) and the count guard can be defeated by a zero-survivor phase
 
+**Status:** FIXED (commit 603db25) — `requiredArtifactsExist` now returns `false` for an empty list (explicit `writtenPaths.length === 0` guard), so a degenerate zero-survivor phase fails closed instead of vacuously passing as `true && 0 === 0`. The engine pass-condition comment was updated and the stale "vacuously true" gate test was rewritten to assert the fail-closed behavior.
+
 **File:** `src/protocol/gate.ts:20-22`, `src/protocol/engine.ts:247-250`
 **Issue:** `requiredArtifactsExist` returns `true` for an empty list, and the engine's pass condition is `requiredArtifactsExist(writtenPaths) && writtenPaths.length === expectedParticipantCount(phase, survivors)`. If a phase somehow yields zero survivors and zero written paths, the expression becomes `true && (0 === 0)` → **pass**, advancing an agent-less run. The comment asserts the engine "never produces a participant-less phase," but `applySkipFailed` would have thrown first only when survivors drop below 2 distinct vendors — it does *not* guarantee `survivors.length > 0` is re-checked at the gate. The invariant is enforced upstream by luck of ordering, not by the gate itself.
 **Fix:** Add an explicit `writtenPaths.length > 0` (or `survivors.length >= 2`) precondition to the pass check so a degenerate empty phase fails closed rather than vacuously passing.
 
 ### WR-04: Gemini error message can leak full stderr into the normalized artifact/log
+
+**Status:** FIXED (commit 928c9ed) — the gemini error fallback now routes through `sanitizeGeminiError` → `boundStderr`, which flattens newlines, strips C0/DEL control chars, and truncates to 500 chars before the stderr can reach the TurnResult `error` (and thus the artifact/log/console). The `unparseable output` branch was bounded the same way. Fixed jointly with Phase 2 WR-03 (same line). Regression test feeds a 2000+ char stderr with newlines and asserts the surfaced error is bounded and control-char-free.
 
 **File:** `src/adapters/gemini.ts:106`
 **Issue:** On the not-ok path the error is `j.error?.message ?? result.stderr ?? "gemini error"`. `result.stderr` is the raw CLI stderr, which on gemini's failure paths can contain arbitrary content (and, in other failure modes, potentially prompt echoes or environment hints). This `error` string flows into the TurnResult, is surfaced on the console (`cli.ts:271-272`, `engine.ts:146`) and persisted in the artifact frontmatter/raw. The redaction discipline (WR-04 in the codebase) is carefully applied to the *command* but the *error* string bypasses it. Claude's path is safer (`j.result`), but the gemini stderr fallthrough is unbounded and unredacted.
@@ -115,11 +129,15 @@ Additionally, thread per-agent `timedOut` outcomes into a distinct run status pa
 
 ### WR-05: `mar invoke --run` resume can still collide on the `.raw.json` sibling, which `nextSeq` does not scan
 
+**Status:** FIXED (commit 5597483) — `seqFromArtifactName`'s regex now matches both `.md` AND `.raw.json` (`/^(\d+)-.+\.(?:md|raw\.json)$/`), so `nextSeq` (which scans on-disk names through it) accounts for an orphan `.raw.json` left by a crash between `writeArtifact`'s two writes. A resumed run can no longer reuse that seq and overwrite the orphan raw (D-10). Stale test asserting `.raw.json → null` was updated; new tests cover the sibling parse and the orphan-advance case. (Also addressed structurally by WR-06's crash-safe pair write below.)
+
 **File:** `src/cli.ts:169-180`, `src/workspace/layout.ts:55-79`
 **Issue:** `nextSeq` derives the next seq from manifest `.md` paths and on-disk names, but `seqFromArtifactName` only matches `*.md` (`/^(\d+)-.+\.md$/`). The overwrite guard at `cli.ts:177` checks only the `.md` artifact path. A prior failed turn that wrote a `.raw.json` but no manifest entry and no `.md` (e.g. crash between the two `writeAtomic` calls in `writeArtifact`) leaves a `NNN-agent-kind.raw.json` orphan whose seq is invisible to `nextSeq`. A resumed run can then reuse that seq for the `.md` while silently overwriting the orphan `.raw.json`, breaking the D-10 "raw never discarded" guarantee.
 **Fix:** Have `nextSeq`/`seqFromArtifactName` also account for `.raw.json` siblings (strip both suffixes), or write the `.raw.json` and `.md` under a single atomic staging dir rename so a partial write cannot orphan one half.
 
 ### WR-06: `writeArtifact` is not atomic across its two files — a crash leaves a `.md` with no `.raw.json` (or vice-versa)
+
+**Status:** FIXED (commit 66b1aa2) — `writeArtifact` now stages BOTH temp files first, then renames `.raw.json` and finally `.md` (the gate's done-signal last), guaranteeing the invariant **md-present ⇒ raw-present**. A crash can leave a `.raw.json` orphan (harmless — gate ignores it, WR-05 keeps its seq monotonic) but never a done `.md` without its raw. On a mid-pair failure the staged `.md` temp is best-effort removed (no stray temps). Regression tests assert the md⇒raw invariant and that a raw-write failure leaves no live `.md` and no temp leftovers.
 
 **File:** `src/workspace/artifacts.ts:75-76`
 **Issue:** The `.md` and `.raw.json` are each written atomically but the *pair* is not. A crash between line 75 and 76 yields a non-empty `.md` (which `isDone` reports as done, the gate passes) with a missing raw JSON, violating D-10. Conversely the engine indexes the artifact into the manifest only after both, so a crash there leaves files on disk with no manifest entry — recoverable, but the half-pair is not.
