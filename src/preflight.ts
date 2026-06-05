@@ -127,17 +127,38 @@ function hintFor(vendor: AgentEntry["vendor"], stage: "install" | "probe"): stri
   }
 }
 
-/** Tier-1: is the binary on PATH and does `--version` parse? Returns installed + extracted semver. */
-async function checkInstalled(bin: string): Promise<{ installed: boolean; version?: string }> {
+/**
+ * The ONE `<bin> --version` probe shared by both the preflight install-check and the invoke-path
+ * version capture (WR-05). Previously `checkInstalled` (here) and `detectVersion` (cli.ts) ran two
+ * separate probes with DIFFERENT success rules — `checkInstalled` required `exitCode === 0` while
+ * `detectVersion` keyed off non-empty stdout — so a CLI that prints its version but exits non-zero
+ * was recorded `installed:true` by `invoke` yet `installed:false` by preflight (contradictory
+ * machine state). This single helper applies ONE rule for both sites.
+ *
+ * Single agreed rule: a binary is INSTALLED iff the spawn succeeds (no ENOENT) AND its `--version`
+ * produced NON-EMPTY stdout. The EXIT CODE is deliberately NOT part of the rule — some tools print
+ * `--version` and exit non-zero — so the two call sites can never disagree again. `version` is the
+ * extracted semver ("unknown" when the stdout has no `\d+.\d+.\d+` token).
+ */
+export async function probeVersion(
+  bin: string,
+): Promise<{ installed: boolean; version: string }> {
   try {
     const { cmd, preArgs } = splitBin(bin);
     const r = await execa(cmd, [...preArgs, "--version"], { reject: false, timeout: 10_000 });
-    if (r.exitCode !== 0) return { installed: false };
-    return { installed: true, version: extractVersion((r.stdout ?? "").trim()) };
+    const out = (r.stdout ?? "").trim();
+    // Installed iff the bin actually responded with output (not a bare spawn-then-empty line).
+    return { installed: out.length > 0, version: out.length > 0 ? extractVersion(out) : "unknown" };
   } catch {
     // ENOENT / spawn failure → not on PATH.
-    return { installed: false };
+    return { installed: false, version: "unknown" };
   }
+}
+
+/** Tier-1: is the binary on PATH and does `--version` parse? Delegates to the shared probe (WR-05). */
+async function checkInstalled(bin: string): Promise<{ installed: boolean; version?: string }> {
+  const { installed, version } = await probeVersion(bin);
+  return installed ? { installed: true, version } : { installed: false };
 }
 
 /**

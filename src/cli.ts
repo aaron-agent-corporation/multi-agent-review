@@ -2,14 +2,12 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
-import { execa } from "execa";
-import { splitBin } from "./adapters/common.js";
 import { makeAdapter } from "./adapters/registry.js";
 import { loadConfig, resolveAgent } from "./config.js";
 import { assertReviewable } from "./gates.js";
 import { detectVendors, writeStarterConfig } from "./init.js";
 import { logInvocation } from "./log/invocation.js";
-import { extractVersion, formatStatusLines, runPreflight } from "./preflight.js";
+import { formatStatusLines, probeVersion, runPreflight } from "./preflight.js";
 import { runProtocol } from "./protocol/engine.js";
 import {
   type Classify,
@@ -99,23 +97,13 @@ export function parseTimeout(value: string | undefined): number | null | undefin
 
 /**
  * Best-effort `<bin> --version` detection → extracted semver, "unknown" if the binary is
- * absent/errors. Uses `extractVersion` (Plan 04) so codex's two-token `codex-cli 0.128.0` and
- * gemini's bare `0.45.0` are captured correctly (Pitfall 2 — never `split()[0]`).
+ * absent/errors. Delegates to the SHARED {@link probeVersion} helper (WR-05) so the invoke-path
+ * version capture and the preflight install-check apply the SAME `--version` rule and can never
+ * disagree on what "installed" means. extractVersion (via probeVersion) captures codex's two-token
+ * `codex-cli 0.128.0` and gemini's bare `0.45.0` correctly (Pitfall 2 — never `split()[0]`).
  */
 async function detectVersion(bin: string): Promise<string> {
-  try {
-    // Reuse the adapter's single-split strategy (WR-01): splitting on every whitespace run
-    // would break an injected bin whose path contains spaces (e.g. "Active Projects/…").
-    const { cmd, preArgs } = splitBin(bin);
-    const r = await execa(cmd, [...preArgs, "--version"], {
-      reject: false,
-      timeout: 10_000,
-    });
-    const out = (r.stdout ?? "").trim();
-    return out.length > 0 ? extractVersion(out) : "unknown";
-  } catch {
-    return "unknown";
-  }
+  return (await probeVersion(bin)).version;
 }
 
 async function runInvoke(opts: InvokeOptions): Promise<number> {
