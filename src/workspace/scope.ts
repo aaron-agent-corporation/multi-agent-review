@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import fsExtra from "fs-extra";
-import { type Vendor, seedInstructions } from "../protocol/instructions.js";
+import { seedInstructions, type Vendor } from "../protocol/instructions.js";
 import { isDone } from "./artifacts.js";
 import { artifactName } from "./layout.js";
 

@@ -10,8 +10,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -24,7 +24,13 @@ import { scopedWorkdir } from "../src/workspace/scope.js";
 
 // The source-of-truth template content, read directly so assertions compare against the contract.
 const TEMPLATE = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "..", "src", "templates", "agent-instructions.md.tmpl"),
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "src",
+    "templates",
+    "agent-instructions.md.tmpl",
+  ),
   "utf8",
 );
 

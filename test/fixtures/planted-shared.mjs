@@ -33,6 +33,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { structuredBody } from "./structured-shared.mjs";
 
 /** Busy-wait `ms` milliseconds synchronously (the fixtures are tiny, synchronous CLIs). */
 function sleepSync(ms) {
@@ -219,9 +220,15 @@ export function sharedDir() {
 
 /**
  * Compute the planted-mode body for a given phase, running the shared disk-coupled mechanics:
- *   • draft  → record the peer-visibility probe, then emit "VALUE=<resolved>".
- *   • review → read promoted peer drafts, emit DISCREPANCY (disagree) or AGREED (match).
- *   • other  → a phase-tagged marker "<vendor>:<phase>".
+ *   • draft  → record the peer-visibility probe, then emit "VALUE=<resolved>" (draft has no
+ *     validate gate, so a bare marker is fine and keeps the VALUE= probe readable off disk).
+ *   • review → read promoted peer drafts, emit a SCHEMA-VALID ReviewFrontmatter whose single issue
+ *     `question` carries the DISCREPANCY/AGREED verdict + the observed values. Embedding the verdict
+ *     in valid frontmatter means the new D-38 validation gate accepts the artifact AND the A/B test's
+ *     `.toContain("DISCREPANCY"/"AGREED"/value)` assertions still read it from the artifact text.
+ *   • response/evaluation/integration → a SCHEMA-VALID structured body (shared generator), so the
+ *     run passes every phase's validate gate and completes (the independence signal is at review).
+ *   • validation/other → a phase-tagged marker (no validate gate).
  */
 export function plantedBody(vendor, args) {
   const phase = phaseFromArgv(args);
@@ -231,9 +238,31 @@ export function plantedBody(vendor, args) {
   }
   if (phase === "review") {
     const vals = peerValues();
-    return vals.length > 1
-      ? `DISCREPANCY values=${vals.join(",")}`
-      : `AGREED value=${vals[0] ?? "none"}`;
+    const verdict =
+      vals.length > 1
+        ? `DISCREPANCY values=${vals.join(",")}`
+        : `AGREED value=${vals[0] ?? "none"}`;
+    // The verdict rides the (schema-required, non-empty) issue question — a single concrete question
+    // per the case-study contract — so the artifact validates AND the verdict is in the text.
+    return [
+      "---",
+      "phase: review",
+      `author: ${agentName()}`,
+      "targets: peer-draft",
+      "issues:",
+      "  - n: 1",
+      "    severity: P1",
+      `    question: ${JSON.stringify(verdict)}`,
+      "---",
+      "",
+      `# Cross-review by ${agentName()}`,
+      "",
+      verdict,
+      "",
+    ].join("\n");
+  }
+  if (phase === "response" || phase === "evaluation" || phase === "integration") {
+    return structuredBody(phase, agentName());
   }
   return `${vendor}:${phase ?? "unknown"}`;
 }

@@ -35,7 +35,10 @@ export type DroppedAgent = z.infer<typeof DroppedAgent>;
  */
 export const Manifest = z.object({
   runId: z.string(), // "20260604-x7Kp2a"
-  status: z.enum(["created", "running", "completed", "failed", "timeout"]),
+  // "escalated" is the O-2 fallback-base outcome: the run completed the protocol but converged via
+  // an escalation rather than unanimous agreement. Additive (mirrors the optional droppedAgents
+  // precedent) so prior manifests parse unchanged.
+  status: z.enum(["created", "running", "completed", "failed", "timeout", "escalated"]),
   createdAt: z.string(), // ISO
   updatedAt: z.string(), // ISO
   cliVersions: z.record(z.string(), z.string()), // { claude: "2.1.162" }
