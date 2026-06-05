@@ -136,7 +136,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 04-04-PLAN.md — bounded convergence sub-machine + convergenceCap + integrator-only merge with per-addition verdicts (REVW-03/04/05, RSLV-01, D-40/41/44)
+- [x] 04-04-PLAN.md — bounded convergence sub-machine + convergenceCap + integrator-only merge with per-addition verdicts (REVW-03/04/05, RSLV-01, D-40/41/44)
 
 **Wave 4** *(blocked on Wave 3)*
 
@@ -168,5 +168,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Workspace + First Adapter | 3/3 | Complete    | 2026-06-04 |
 | 2. Adapter Layer + Roster + Pre-flight | 5/5 | Complete   | 2026-06-04 |
 | 3. Protocol Engine + Independence Enforcement | 3/3 | Complete   | 2026-06-05 |
-| 4. First End-to-End Run | 3/5 | In Progress|  |
+| 4. First End-to-End Run | 4/5 | In Progress|  |
 | 5. Hardening — Resume, Gating, Majority, Guards | 0/TBD | Not started | - |
