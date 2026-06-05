@@ -1,6 +1,5 @@
 import { join } from "node:path";
 import fsExtra from "fs-extra";
-import matter from "gray-matter";
 import {
   DecisionRecordFrontmatter,
   type OpenDecision,
@@ -11,8 +10,9 @@ import type { ManifestArtifact } from "../schema/manifest.js";
 import { ResponseFrontmatter } from "../schema/response.js";
 import { readManifest } from "../workspace/manifest.js";
 import type { ConvergenceResult } from "./converge.js";
+import { readAgentFrontmatter } from "./frontmatter.js";
 
-const { ensureDir, readFile, rename, writeFile } = fsExtra;
+const { ensureDir, rename, writeFile } = fsExtra;
 
 const RECORD_FILE = "decision-record.md";
 
@@ -85,28 +85,6 @@ function serializeFrontmatter(record: DecisionRecordFrontmatter): string {
   }
 
   return `---\n${lines.join("\n")}\n---\n`;
-}
-
-/**
- * Parse the AGENT'S emitted frontmatter from a written artifact. The on-disk `.md` carries the
- * engine-metadata wrapper block FIRST (writeArtifact prepends agent/seq/kind/timestamp/runId/phase);
- * the agent's own frontmatter lives in the body AFTER it. So we parse twice: strip the engine block
- * with `matter(file)`, then `matter(outer.content.trimStart())` reads the agent's frontmatter — the
- * SAME "validate the agent's emitted frontmatter, not the wrapper" rule the engine validation gate
- * and the convergence loop follow (04-03/04-04). gray-matter default js-yaml SAFE load (T-04-07).
- * Returns null when the file is missing/unreadable (a non-signal — that artifact simply does not
- * contribute decisions).
- */
-async function readAgentFrontmatter(path: string): Promise<unknown | null> {
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch {
-    return null;
-  }
-  const outer = matter(raw);
-  const inner = matter(outer.content.trimStart());
-  return inner.data;
 }
 
 /** Manifest artifacts filtered to one kind (e.g. all `response` artifacts). */
