@@ -9,10 +9,11 @@
   "bin": {
     "mar": "./dist/cli.js"
   },
+  "files": ["dist"],
   "scripts": {
     "test": "vitest run",
     "dev": "tsx src/cli.ts",
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/templates','dist/templates',{recursive:true})\"",
     "lint": "biome check .",
     "format": "biome format --write ."
   },
