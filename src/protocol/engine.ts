@@ -17,6 +17,7 @@ import type { AgentEntry, MarConfig } from "../schema/config.js";
 import { EvaluationFrontmatter } from "../schema/evaluation.js";
 import { IntegrationFrontmatter } from "../schema/integration.js";
 import { type Manifest, RESUMABLE_STATUSES, TERMINAL_DONE } from "../schema/manifest.js";
+import type { ResolvedDecisionEntry } from "../schema/resolved-decisions.js";
 import { ResponseFrontmatter } from "../schema/response.js";
 import { ReviewFrontmatter } from "../schema/review.js";
 import { isDone, writeArtifact } from "../workspace/artifacts.js";
@@ -37,6 +38,13 @@ import {
   writeHumanRuling,
 } from "./gating.js";
 import { PHASES, type Phase } from "./phases.js";
+import {
+  appendResolved,
+  enforceDrop,
+  type RelitigationDrop,
+  recordRelitigationDrops,
+  settledIds,
+} from "./resolved-decisions.js";
 
 /** Per-vendor transient-vs-fatal classifier for the retry seam (mirrors cli.ts CLASSIFY). */
 const CLASSIFY: Record<AgentEntry["vendor"], Classify> = {
@@ -399,6 +407,155 @@ function designateIntegrator(roster: AgentEntry[], designated?: AgentEntry): Age
   return integrator;
 }
 
+// ============================================================================================
+// RE-LITIGATION GUARD (D-62/D-63/D-64). The rolling shared/resolved-decisions.md ledger is appended
+// at sequential phase boundaries as forks settle (Pitfall 7 — the engine drives phases sequentially,
+// so a boundary append has no concurrent writer). Before INTEGRATION and VALIDATION fan-out the guard
+// reads the settled ids and DROPS (drop + warn, no retry) any incoming position that reopens one. The
+// PINNED resolver values match the decision-record contested-collection exactly so the terminal record
+// and the ledger agree (response concessions → "convergence"; integrator calls → "integrator").
+// ============================================================================================
+
+/**
+ * After the RESPONSE phase settles, append each contested verdict (reject-with-reason / refine) to the
+ * rolling ledger with resolver `convergence` — PINNED (these author concessions are part of the
+ * evidence-grounded debate; the enum locks `integrator`/`human`/`majority` to their own paths). The id
+ * + summary + rationale MIRROR decision-record.ts's contested-collection so the trail cross-check and
+ * the ledger tag identical entries identically. Sequential (outside any fan-out).
+ */
+async function appendResponseLedger(runDir: string): Promise<void> {
+  const manifest = await readManifest(runDir);
+  const runId = manifest.runId;
+  const entries: ResolvedDecisionEntry[] = [];
+  for (const art of manifest.artifacts.filter((a) => a.kind === "response")) {
+    const data = await readAgentFrontmatter(join(runDir, art.path));
+    if (data === null) continue;
+    const parsed = ResponseFrontmatter.safeParse(data);
+    if (!parsed.success) continue;
+    const response = parsed.data;
+    for (const v of response.responses) {
+      if (v.verdict === "accept") continue; // unanimous → not a settled contested fork
+      const lineage = [
+        `${art.path} issue ${v.issueRef}`,
+        `${response.reviewOf} issue ${v.issueRef}`,
+      ];
+      if (v.verdict === "reject-with-reason") {
+        entries.push({
+          id: `response-${response.author}-issue-${v.issueRef}`,
+          summary: `${response.author} rejected issue ${v.issueRef}`,
+          rationale: v.reason,
+          lineage,
+          resolver: "convergence",
+        });
+      } else {
+        entries.push({
+          id: `response-${response.author}-issue-${v.issueRef}`,
+          summary: `${response.author} refined issue ${v.issueRef}`,
+          rationale: v.refinement,
+          lineage,
+          resolver: "convergence",
+        });
+      }
+    }
+  }
+  await appendResolved(runDir, runId, entries);
+}
+
+/**
+ * After the INTEGRATION phase settles, append each integrator call (dropped / merged-with-change) to
+ * the ledger with resolver `integrator` (PINNED — integration-phase calls). `merged` is unanimous →
+ * not a contested fork. Mirrors decision-record.ts's integration contested-collection exactly.
+ */
+async function appendIntegrationLedger(runDir: string): Promise<void> {
+  const manifest = await readManifest(runDir);
+  const runId = manifest.runId;
+  const entries: ResolvedDecisionEntry[] = [];
+  for (const art of manifest.artifacts.filter((a) => a.kind === "integration")) {
+    const data = await readAgentFrontmatter(join(runDir, art.path));
+    if (data === null) continue;
+    const parsed = IntegrationFrontmatter.safeParse(data);
+    if (!parsed.success) continue;
+    const integration = parsed.data;
+    for (const add of integration.additions) {
+      if (add.verdict === "merged") continue;
+      const lineage = [`${art.path} addition ${add.additionRef}`, `base: ${integration.base}`];
+      if (add.verdict === "merged-with-change") {
+        entries.push({
+          id: `integration-${add.additionRef}`,
+          summary: `integrator merged ${add.additionRef} with a change`,
+          rationale: add.change,
+          lineage,
+          resolver: "integrator",
+        });
+      } else {
+        entries.push({
+          id: `integration-${add.additionRef}`,
+          summary: `integrator dropped ${add.additionRef}`,
+          rationale: add.reason,
+          lineage,
+          resolver: "integrator",
+        });
+      }
+    }
+  }
+  await appendResolved(runDir, runId, entries);
+}
+
+/**
+ * After CONVERGENCE resolves, append its concessions + (when a majority tie-break settled it) a
+ * majority resolution to the ledger (D-63). Concessions take resolver `convergence`; a `majority`
+ * resolver on the result tags the resolution entry `majority` (05-03). Human rulings are appended
+ * separately in {@link runArbitrationBoundary}. Sequential (the convergence actor's onDone).
+ */
+async function appendConvergenceLedger(
+  runDir: string,
+  convergence: ConvergenceResult,
+): Promise<void> {
+  const runId = (await readManifest(runDir)).runId;
+  const entries: ResolvedDecisionEntry[] = [];
+  for (let i = 0; i < convergence.concessions.length; i++) {
+    const disagreement = convergence.concessions[i];
+    entries.push({
+      id: `concession-${i + 1}`,
+      summary: `disagreement conceded during convergence: ${disagreement}`,
+      rationale: `conceded across ${convergence.rounds} evaluation round(s); converged on base "${convergence.base}"`,
+      lineage: [`evaluation rounds 1..${convergence.rounds}`, `base: ${convergence.base}`],
+      resolver: "convergence",
+    });
+  }
+  if (convergence.status === "agreed" && convergence.resolver === "majority") {
+    entries.push({
+      id: "convergence-majority",
+      summary: `majority of the roster resolved the base to "${convergence.base}"`,
+      rationale: `no unanimous agreement; a clear majority (>roster/2) settled on "${convergence.base}" after ${convergence.rounds} round(s)`,
+      lineage: [`evaluation rounds 1..${convergence.rounds}`, `base: ${convergence.base}`],
+      resolver: "majority",
+    });
+  }
+  await appendResolved(runDir, runId, entries);
+}
+
+/**
+ * Enforce the re-litigation guard before a phase's fan-out (D-62/D-64). Read the ledger's settled ids,
+ * run {@link enforceDrop} against each incoming position of `kind` (the prior phase's artifacts the
+ * upcoming phase builds on), and record any drop (drop + warn, no retry — the run CONTINUES; the
+ * terminal record notes the violation). Before INTEGRATION the incoming positions are the response
+ * artifacts; before VALIDATION they are the integration artifacts.
+ */
+async function enforceRelitigation(runDir: string, kind: string): Promise<void> {
+  const ids = await settledIds(runDir);
+  if (ids.size === 0) return;
+  const manifest = await readManifest(runDir);
+  const drops: RelitigationDrop[] = [];
+  for (const art of manifest.artifacts.filter((a) => a.kind === kind)) {
+    const data = await readAgentFrontmatter(join(runDir, art.path));
+    if (data === null) continue;
+    const drop = enforceDrop(art.path, ids, data);
+    if (drop) drops.push(drop);
+  }
+  await recordRelitigationDrops(runDir, drops);
+}
+
 async function runPhaseGated(
   phase: Phase,
   roster: AgentEntry[],
@@ -410,6 +567,16 @@ async function runPhaseGated(
   // roster. Every other phase fans out over all survivors. The gate's expectedParticipantCount
   // independently expects exactly 1 writer for the integrator phase, so a redundant non-integrator
   // merge (or a missing merge) fails the gate.
+  // RE-LITIGATION ENFORCEMENT (D-62/D-64): before INTEGRATION and VALIDATION fan-out, drop any
+  // incoming position that reopens a settled ledger decision (drop + warn, no retry — the run
+  // continues; the terminal record notes it). Integration builds on the response positions; validation
+  // builds on the integration positions. Run at the boundary BEFORE the upcoming phase fans out.
+  if (phase.name === "integration") {
+    await enforceRelitigation(input.runDir, "response");
+  } else if (phase.name === "validation") {
+    await enforceRelitigation(input.runDir, "integration");
+  }
+
   const fanoutRoster =
     phase.participants === "integrator"
       ? [designateIntegrator(roster, designatedIntegrator)]
@@ -462,6 +629,16 @@ async function runPhaseGated(
     requiredArtifactsExist(writtenPaths) &&
     writtenPaths.length === expectedParticipantCount(phase, survivors);
   if (passes) {
+    // LEDGER APPEND (D-63): after a phase settles, append its newly-settled contested forks to the
+    // rolling shared/resolved-decisions.md ledger (sequential boundary — no concurrent writer,
+    // Pitfall 7). PINNED resolvers: response concessions → "convergence"; integrator calls →
+    // "integrator". Convergence concessions + majority resolutions are appended from the convergence
+    // actor; human rulings from the arbitration boundary.
+    if (phase.name === "response") {
+      await appendResponseLedger(input.runDir);
+    } else if (phase.name === "integration") {
+      await appendIntegrationLedger(input.runDir);
+    }
     // REVW-04: the integration phase ran over ONLY the integrator, but the non-integrators did NOT
     // fail — they simply did not participate. Carry the FULL incoming roster forward so the
     // following validation phase still fans out over every surviving agent (the integrator phase
@@ -581,6 +758,12 @@ async function runArbitrationBoundary(
   if (!convergence) {
     throw new Error("arbitration boundary reached with no convergence result");
   }
+  // LEDGER APPEND (D-63): the arbitration boundary ALWAYS runs after convergence (no-op in autonomous
+  // for the human ruling, but the boundary still fires), so it is the sequential seam where the
+  // convergence concessions + any majority resolution are appended to the rolling ledger — concessions
+  // resolver "convergence", a clear-majority tie-break resolver "majority" (05-03).
+  await appendConvergenceLedger(input.runDir, convergence);
+
   const gating = input.gating;
   if (gating?.mode !== "gated" || convergence.status !== "escalated") {
     return convergence; // autonomous, or already resolved → no human ruling.
@@ -591,6 +774,9 @@ async function runArbitrationBoundary(
   const outcome = await runArbitration(gating.ask, input.runDir, convergence);
   const entry = arbitrationLedgerEntry(convergence, outcome);
   await writeHumanRuling(input.runDir, entry);
+  // Append the human ruling to the rolling ledger (D-63), resolver "human" (the ruling entry IS a
+  // ResolvedDecisionEntry — 05-05's arbitrationLedgerEntry minted it with resolver:"human").
+  await appendResolved(input.runDir, (await readManifest(input.runDir)).runId, [entry]);
   // The arbitrated result is now resolved by a human: status `agreed`, resolver `human`, the chosen
   // base + its author as integrator. The open decision is cleared (it was settled by the ruling).
   return {

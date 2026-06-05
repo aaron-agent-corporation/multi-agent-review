@@ -252,3 +252,60 @@ export function enforceDrop(
   );
   return { artifactPath, relitigatedIds, reason: "re-litigation" };
 }
+
+/**
+ * The on-disk record of re-litigation drops (D-64), under the run's `shared/` dir. The terminal
+ * decision record reads it to note each violation (the run continued, but the guard fired). A plain
+ * JSON sidecar (the drops are orchestrator-minted, not agent-authored prose) — appended sequentially
+ * via the per-runDir serializeWrite chain so concurrent enforcement at a boundary never loses a drop.
+ */
+const DROPS_FILE = join("shared", "relitigation-drops.json");
+
+function dropsPath(runDir: string): string {
+  return join(runDir, DROPS_FILE);
+}
+
+/** Read the recorded re-litigation drops (empty array when none recorded yet). */
+export async function readRelitigationDrops(runDir: string): Promise<RelitigationDrop[]> {
+  let raw: string;
+  try {
+    raw = await readFile(dropsPath(runDir), "utf8");
+  } catch {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as RelitigationDrop[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Append re-litigation drops to the run's sidecar record (D-64), idempotently by artifactPath, routed
+ * through the per-runDir serializeWrite chain (Pitfall 7) and written atomically (temp-then-rename).
+ */
+export async function recordRelitigationDrops(
+  runDir: string,
+  drops: RelitigationDrop[],
+): Promise<void> {
+  if (drops.length === 0) return;
+  await serializeWrite(runDir, async () => {
+    const current = await readRelitigationDrops(runDir);
+    const byPath = new Map<string, RelitigationDrop>();
+    for (const d of current) byPath.set(d.artifactPath, d);
+    for (const d of drops) byPath.set(d.artifactPath, d);
+    const next = [...byPath.values()];
+    await ensureDir(join(runDir, "shared"));
+    const finalPath = dropsPath(runDir);
+    const tmpPath = `${finalPath}.tmp-${process.pid}`;
+    await writeFile(tmpPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+    await rename(tmpPath, finalPath);
+  });
+}
+
+/** The set of settled decision ids in the current ledger (for the enforcement pass). */
+export async function settledIds(runDir: string): Promise<Set<string>> {
+  const ledger = await readLedger(runDir);
+  return new Set(ledger.decisions.map((d) => d.id));
+}

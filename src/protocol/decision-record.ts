@@ -3,6 +3,7 @@ import fsExtra from "fs-extra";
 import {
   DecisionRecordFrontmatter,
   type OpenDecision,
+  type RelitigationViolation,
   type ResolvedDecision,
 } from "../schema/decision-record.js";
 import { IntegrationFrontmatter } from "../schema/integration.js";
@@ -11,6 +12,7 @@ import { ResponseFrontmatter } from "../schema/response.js";
 import { readManifest } from "../workspace/manifest.js";
 import type { ConvergenceResult } from "./converge.js";
 import { readAgentFrontmatter } from "./frontmatter.js";
+import { readLedger, readRelitigationDrops } from "./resolved-decisions.js";
 
 const { ensureDir, rename, writeFile } = fsExtra;
 
@@ -55,6 +57,9 @@ function serializeFrontmatter(record: DecisionRecordFrontmatter): string {
       lines.push(`  - id: ${yamlScalar(d.id)}`);
       lines.push(`    summary: ${yamlScalar(d.summary)}`);
       lines.push(`    rationale: ${yamlScalar(d.rationale)}`);
+      // resolver (D-61/D-63) — present on ledger-sourced entries (how the fork settled); omitted on a
+      // trail-only cross-check entry not yet in the ledger (optional + additive).
+      if (d.resolver !== undefined) lines.push(`    resolver: ${yamlScalar(d.resolver)}`);
       if (d.lineage.length === 0) {
         lines.push("    lineage: []");
       } else {
@@ -82,6 +87,23 @@ function serializeFrontmatter(record: DecisionRecordFrontmatter): string {
   } else {
     lines.push("runChain:");
     for (const step of record.runChain) lines.push(`  - ${yamlScalar(step)}`);
+  }
+
+  // Re-litigation violations (D-64): positions dropped for reopening a settled decision.
+  if (record.relitigationViolations.length === 0) {
+    lines.push("relitigationViolations: []");
+  } else {
+    lines.push("relitigationViolations:");
+    for (const v of record.relitigationViolations) {
+      lines.push(`  - artifactPath: ${yamlScalar(v.artifactPath)}`);
+      lines.push(`    reason: ${yamlScalar(v.reason)}`);
+      if (v.relitigatedIds.length === 0) {
+        lines.push("    relitigatedIds: []");
+      } else {
+        lines.push("    relitigatedIds:");
+        for (const id of v.relitigatedIds) lines.push(`      - ${yamlScalar(id)}`);
+      }
+    }
   }
 
   return `---\n${lines.join("\n")}\n---\n`;
@@ -219,6 +241,39 @@ export async function writeDecisionRecord(
   if (base) runChain.push(`base draft: ${base}`);
   if (integrationArtifact) runChain.push(`final: ${integrationArtifact.path}`);
 
+  // ---- ASSEMBLE FROM THE ROLLING LEDGER (D-63). The ledger is the authoritative settled-fork trail
+  // appended as forks resolved (response/convergence/majority/integrator/human). We source the
+  // `resolver` from it (Open Q1 recommendation: ADDITIVE — the trail re-derivation above stays as a
+  // cross-check, the ledger supplies provenance + any human ruling the trail can't see). Overlay the
+  // resolver onto matching trail entries by id; APPEND ledger-only entries (e.g. the human ruling,
+  // majority resolution) not present in the trail. The ledger entry's resolver/rationale win.
+  const ledger = await readLedger(runDir);
+  const ledgerById = new Map(ledger.decisions.map((d) => [d.id, d]));
+  const trailIds = new Set(resolvedDecisions.map((d) => d.id));
+  for (const d of resolvedDecisions) {
+    const led = ledgerById.get(d.id);
+    if (led) d.resolver = led.resolver; // source the resolver (D-61) from the ledger.
+  }
+  for (const led of ledger.decisions) {
+    if (!trailIds.has(led.id)) {
+      resolvedDecisions.push({
+        id: led.id,
+        summary: led.summary,
+        rationale: led.rationale,
+        lineage: led.lineage,
+        resolver: led.resolver,
+      });
+    }
+  }
+
+  // ---- Re-litigation violations (D-64): note the dropped positions the guard caught during the run.
+  const drops = await readRelitigationDrops(runDir);
+  const relitigationViolations: RelitigationViolation[] = drops.map((dr) => ({
+    artifactPath: dr.artifactPath,
+    relitigatedIds: dr.relitigatedIds,
+    reason: "re-litigation" as const,
+  }));
+
   // Validate BEFORE writing (T-04-14: a resolved decision missing its rationale is malformed — the
   // schema requires a non-empty rationale, so parse throws rather than persisting it).
   const validated = DecisionRecordFrontmatter.parse({
@@ -227,6 +282,7 @@ export async function writeDecisionRecord(
     openDecisions,
     unanimousTally,
     runChain,
+    relitigationViolations,
   });
 
   // Human rationale narrative body (the record reads as "what was argued and why it landed").
@@ -252,9 +308,22 @@ function renderBody(record: DecisionRecordFrontmatter): string {
     lines.push("None — every addition was unanimously accepted.");
   } else {
     for (const d of record.resolvedDecisions) {
-      lines.push(`- **${d.summary}** (${d.id})`);
+      const by = d.resolver ? ` — resolved by ${d.resolver}` : "";
+      lines.push(`- **${d.summary}** (${d.id})${by}`);
       lines.push(`  - rationale: ${d.rationale}`);
       if (d.lineage.length > 0) lines.push(`  - lineage: ${d.lineage.join(" → ")}`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## Re-litigation violations (dropped)");
+  if (record.relitigationViolations.length === 0) {
+    lines.push("None — no settled decision was reopened.");
+  } else {
+    for (const v of record.relitigationViolations) {
+      lines.push(
+        `- **${v.artifactPath}** dropped (${v.reason}) — reopened: ${v.relitigatedIds.join(", ")}`,
+      );
     }
   }
   lines.push("");
