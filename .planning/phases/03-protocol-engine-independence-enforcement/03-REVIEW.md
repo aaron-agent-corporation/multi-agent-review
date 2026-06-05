@@ -30,6 +30,11 @@ findings:
   info: 4
   total: 12
 status: issues_found
+fixed:
+  - CR-01
+  - CR-02
+fixed_at: 2026-06-04T00:00:00Z
+fixed_note: "Both criticals fixed (criticals-first). Warnings WR-01..06 and Info IN-01..04 remain open."
 ---
 
 # Phase 3: Code Review Report
@@ -48,6 +53,8 @@ However, two correctness defects undermine the phase's central guarantees: (1) t
 ## Critical Issues
 
 ### CR-01: Terminal status double-write maps all non-`done` XState values to `failed`, masking engine errors
+
+**Status:** FIXED (commit 2061208) — `runProtocol` now reads the machine snapshot once, maps an all-timeout failure to the schema's distinct `timeout` status (D-17) and every other failure to `failed`, and persists the actual cause to a new optional `Manifest.failureReason` (additive zod field) while mirroring it to stderr. The failure cause — gate reason, agent timeout, sub-2-vendor drop, or an actor `onError` error — is threaded through a structured `PhaseFailure` in machine context instead of being discarded.
 
 **File:** `src/protocol/engine.ts:356-360`
 **Issue:** `runProtocol` derives success from `actor.getSnapshot().value === "done"` and then writes `setStatus(runDir, ok ? "completed" : "failed")`. Two problems compound:
@@ -72,6 +79,8 @@ return 1;
 Additionally, thread per-agent `timedOut` outcomes into a distinct run status path so D-17's `timeout` status is reachable from `mar run`, not only `mar invoke`.
 
 ### CR-02: Independence proof is not falsifiable — the CONTROL arm never exercises a shared-context drafting path
+
+**Status:** FIXED (commit 03059b6) — the control arm now runs with `MAR_SHARED_CONTEXT=1`, which GENUINELY bypasses scoped isolation: each fixture deposits its draft into a shared, peer-visible `work/_shared_drafts/` dir, waits (bounded) for all participants, and anchors on a deterministic consensus value READ OFF DISK. The control is handed the SAME divergent values (99 vs 42) as the treatment, so its "AGREED" is a real consequence of context sharing — verified: with the same divergent inputs and isolation intact, the run surfaces a `DISCREPANCY`. The treatment keeps real scoped isolation and now adds a falsifiability assertion: each drafting agent records the peer drafts visible in its own scoped cwd to `work/<agent>/peer-visibility.json`, and the test asserts these are EMPTY — so a scope.ts leak of a peer draft into `work/<agent>/` MUST fail the treatment test. Shared fixture mechanics extracted to `test/fixtures/planted-shared.mjs`.
 
 **File:** `test/planted-error.test.ts:117-133`, `test/fixtures/fake-claude.mjs:130-144`
 **Issue:** The file's own header (lines 1-29) stakes the entire phase on a falsifiable A/B: TREATMENT must surface a discrepancy that CONTROL masks. But both arms run the **identical scoped-draft mechanism** (`runProtocol` → scoped `work/<agent>/` → `promoteDrafts`). The only difference is the injected `MAR_PLANTED_VALUES`: CONTROL passes the same value to both agents, TREATMENT passes divergent values. The CONTROL therefore does **not** test that a shared-context (non-scoped) drafting path would mask the error — it tests that two fixtures handed identical constants emit identical drafts. The scoped isolation mechanism is never disabled in the control. As written, the test would still pass even if `scopedWorkdir`/`promoteDrafts` were completely broken, as long as both fixtures happened to read the same value from env — the control's "AGREED" outcome does not depend on isolation at all. This means a regression that *leaked* peer drafts during drafting (the exact confidentiality failure the phase exists to prevent) would not be caught: in TREATMENT, a leak would make codex *see* claude's `VALUE=99` draft, but the fixtures key their own draft value off env (not off peer files) during the draft phase, so the leak is invisible to the draft output and the review still sees two distinct promoted values → still "DISCREPANCY" → test still green.
