@@ -44,6 +44,12 @@ export const MarConfig = z
       .object({
         timeoutMs: z.number().int().positive().default(600_000),
         retries: z.number().int().min(0).default(2),
+        // convergenceCap (D-41/D-43): the hard backstop on the evaluation convergence loop. It is a
+        // DoS guard (T-04-12), never a tuning knob to cut rounds for token cost — the loop runs to
+        // agreement OR this cap, whichever comes first. Default 10 (D-41); configurable per run in
+        // mar.config.json. Lives inside the `.prefault({})` block (NOT `.default`) so the nested
+        // default fires when `defaults` is omitted (zod v4 prefault-re-parses; default does not).
+        convergenceCap: z.number().int().positive().default(10),
       })
       .prefault({}),
   })

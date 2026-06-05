@@ -27,7 +27,7 @@ const CLASSIFY: Record<AgentEntry["vendor"], Classify> = {
 };
 
 /** Shared input every actor/guard reads from the machine context. */
-interface ProtocolInput {
+export interface ProtocolInput {
   runDir: string;
   config: MarConfig;
   inputPath: string;
@@ -44,7 +44,7 @@ interface FailedAgent {
  * plus the partition of the CURRENT roster into the agents that succeeded and those that failed.
  * The engine uses ok/failed to apply partial-failure handling (D-30) and shrink the live roster.
  */
-interface PhaseResult {
+export interface PhaseResult {
   writtenPaths: string[];
   ok: AgentEntry[];
   failed: FailedAgent[];
@@ -58,7 +58,7 @@ interface PhaseResult {
  * written AND the ok/failed partition of `roster`. `writtenPaths` is the SINGLE SOURCE OF TRUTH the
  * phase gate consumes; ok/failed drives the partial-failure handler in {@link runPhaseGated}.
  */
-async function runPhase(
+export async function runPhase(
   phase: Phase,
   roster: AgentEntry[],
   input: ProtocolInput,
