@@ -13,7 +13,7 @@
   "scripts": {
     "test": "vitest run",
     "dev": "tsx src/cli.ts",
-    "build": "tsc && node -e \"require('fs').cpSync('src/templates','dist/templates',{recursive:true})\"",
+    "build": "tsc && node -e \"require('fs').cpSync('src/templates','dist/src/templates',{recursive:true})\"",
     "lint": "biome check .",
     "format": "biome format --write ."
   },
