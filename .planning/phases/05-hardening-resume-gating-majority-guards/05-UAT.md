@@ -3,7 +3,7 @@ status: complete
 phase: 05-hardening-resume-gating-majority-guards
 source: [05-01-SUMMARY.md, 05-02-SUMMARY.md, 05-03-SUMMARY.md, 05-04-SUMMARY.md, 05-05-SUMMARY.md, 05-06-SUMMARY.md]
 started: 2026-06-05T20:55:00Z
-updated: 2026-06-06T10:05:00Z
+updated: 2026-06-06T10:40:00Z
 ---
 
 ## Current Test
@@ -59,7 +59,8 @@ skipped: 1
 ## Gaps
 
 - truth: "The compiled `mar` binary runs the protocol without template ENOENT"
-  status: failed
+  status: resolved
+  resolved_by: "05-07 (c29f560/60461ae) + bin.mar fix (3ce221d); compiled-CLI fixture run now part of the guard test"
   reason: "Build copies src/templates -> dist/templates, but compiled resolver expects dist/src/templates (tsc preserves src/ prefix in outDir). dist-template.test.ts asserts existence at dist/templates — wrong path, so the guard test passes while the binary is broken."
   severity: major
   test: 1
