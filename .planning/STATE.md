@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
+status: Awaiting next milestone
 stopped_at: Phase 5 planning complete
-last_updated: "2026-06-06T14:00:08.811Z"
-last_activity: 2026-06-06 -- Phase 05 execution started
+last_updated: "2026-06-08T01:36:24.325Z"
+last_activity: 2026-06-08 — Milestone v1.0 completed and archived
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 23
-  completed_plans: 22
-  percent: 80
+  completed_plans: 23
+  percent: 100
 ---
 
 # Project State
@@ -25,12 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-04)
 
 ## Current Position
 
-Phase: 05 (hardening-resume-gating-majority-guards) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 05
-Last activity: 2026-06-06 -- Phase 05 execution started
-
-Progress: [██████████] 100%
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-08 — Milestone v1.0 completed and archived
 
 ## Performance Metrics
 
@@ -104,3 +102,7 @@ Items acknowledged and carried forward from previous milestone close:
 Last session: 2026-06-05T18:21:19.676Z
 Stopped at: Phase 5 planning complete
 Resume file: .planning/phases/05-hardening-resume-gating-majority-guards/05-01-PLAN.md
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
