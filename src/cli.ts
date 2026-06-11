@@ -448,7 +448,25 @@ async function runRun(input: string, opts: RunOptions = {}): Promise<number> {
  * Exactly one of `<run-id>` / `--last` must be supplied (usage error otherwise). `<run-id>` is
  * validated against RUN_ID_RE (the path-traversal guard, T-05-10) and the run dir must exist.
  */
-async function runResume(opts: { runId?: string; last?: boolean }): Promise<number> {
+async function runResume(opts: {
+  runId?: string;
+  last?: boolean;
+  step?: boolean;
+  feedback?: string;
+  abort?: boolean;
+}): Promise<number> {
+  // 0. Non-interactive gate-decision flags (D-50/D-51 relay surface for drivers like the Claude
+  //    Code plugin): `--abort` ends the paused run and runs nothing, so it cannot be combined with
+  //    flags that continue it.
+  if (opts.abort && (opts.step || opts.feedback !== undefined)) {
+    process.stderr.write("error: --abort cannot be combined with --step or --feedback\n");
+    return 2;
+  }
+  if (opts.feedback !== undefined && opts.feedback.trim().length === 0) {
+    process.stderr.write("error: --feedback requires a non-empty note\n");
+    return 2;
+  }
+
   // 1. Load the roster (clear missing/invalid errors → exit 2).
   let config: Awaited<ReturnType<typeof loadConfig>>;
   try {
@@ -514,9 +532,30 @@ async function runResume(opts: { runId?: string; last?: boolean }): Promise<numb
     return 2;
   }
 
+  // 4b. `--abort`: end a PAUSED run without running anything. Mirrors the interactive abort path
+  //     (engine gate → `failed` with a human-attributed cause; there is no separate `aborted`
+  //     status). Only a gate pause is abortable here — an interrupted/failed run has nothing
+  //     pending a human decision.
+  if (opts.abort) {
+    if (manifest.status !== "paused-awaiting-approval") {
+      process.stderr.write(
+        `error: --abort requires a run paused at a gate (status "paused-awaiting-approval"); found "${manifest.status}"\n`,
+      );
+      return 2;
+    }
+    await setStatus(runDir, "failed", "run aborted by human at a gate (mar resume --abort)");
+    process.stdout.write(`✗ run ${manifest.runId} aborted at the gate\n`);
+    return 0;
+  }
+
   // 5. Delegate the entire resume (phase derivation + D-56 re-validation + preflight + terminal
-  //    status) to the engine and return its exit code.
-  return await resumeProtocol(runDir, config);
+  //    status) to the engine and return its exit code. `--step` resumes gated with pause-and-exit
+  //    (run exactly one phase, then pause again — the non-interactive per-gate stepping surface);
+  //    `--feedback` threads a D-51 steering note into the resumed phase's prompt.
+  const gating: GatingOptions | undefined = opts.step
+    ? { mode: "gated", pauseAndExit: true }
+    : undefined;
+  return await resumeProtocol(runDir, config, gating, opts.feedback?.trim());
 }
 
 export function buildProgram(): Command {
@@ -577,9 +616,29 @@ export function buildProgram(): Command {
     .description("Resume an interrupted/failed/paused run from its last completed phase")
     .argument("[run-id]", "the run id to resume (omit when using --last)")
     .option("--last", "resume the most-recent resumable run")
-    .action(async (runId: string | undefined, opts: { last?: boolean }) => {
-      process.exitCode = await runResume({ runId, last: opts.last });
-    });
+    .option("--step", "resume gated: run exactly one phase, then pause again at the next boundary")
+    .option(
+      "--feedback <note>",
+      "steer the resumed phase with a human feedback note (D-51; recorded in gate-feedback/)",
+    )
+    .option(
+      "--abort",
+      "end a gate-paused run without running anything (cannot combine with --step/--feedback)",
+    )
+    .action(
+      async (
+        runId: string | undefined,
+        opts: { last?: boolean; step?: boolean; feedback?: string; abort?: boolean },
+      ) => {
+        process.exitCode = await runResume({
+          runId,
+          last: opts.last,
+          step: opts.step,
+          feedback: opts.feedback,
+          abort: opts.abort,
+        });
+      },
+    );
 
   return program;
 }

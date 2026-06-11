@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import matter from "gray-matter";
 import { assign, createActor, fromPromise, setup, toPromise } from "xstate";
@@ -92,6 +93,12 @@ export interface ProtocolInput {
    * prompts/pauses. In `gated` mode the engine pauses at each phase boundary via `gating.ask`.
    */
   gating?: GatingOptions;
+  /**
+   * A human gate feedback note (D-51) supplied at resume time (`mar resume --feedback`), seeded as
+   * the FIRST phase's steering note. The same one-phase-only semantics as an interactively-collected
+   * note apply: the resumed phase consumes it, then it is cleared.
+   */
+  feedback?: string;
 }
 
 /** A roster agent that failed its turn in a phase, with the reason for the audit log. */
@@ -729,7 +736,17 @@ async function runGateBoundary(
 ): Promise<GateActorOutcome> {
   const gating = input.gating;
   if (gating?.mode !== "gated") return { kind: "approve" };
-  if (gating.pauseAndExit) return { kind: "pause" };
+  if (gating.pauseAndExit) {
+    // The evaluation→integration boundary CANNOT pause-and-exit: evaluation's terminal output (the
+    // designated base + integrator) lives only in machine context, and resume re-derives evaluation
+    // as incomplete until an integration artifact exists (D-54 / firstIncompletePhase). Pausing here
+    // would strand the run in an unresumable loop (resume restarts convergence → same boundary →
+    // pause again, forever). So a pause-and-exit step carries evaluation THROUGH integration and
+    // pauses at the next boundary instead. Interactive gated runs still prompt here (in-memory
+    // context survives an interactive gate).
+    if (completedPhase === "evaluation") return { kind: "approve" };
+    return { kind: "pause" };
+  }
   if (!gating.ask) {
     throw new Error("gated mode requires an ask() seam but none was provided");
   }
@@ -765,7 +782,14 @@ async function runArbitrationBoundary(
 
   const gating = input.gating;
   if (gating?.mode !== "gated" || convergence.status !== "escalated") {
-    return convergence; // autonomous, or already resolved → no human ruling.
+    // Autonomous, or already resolved → no human ruling. Persisted so a later resume re-derives it.
+    return await persistConvergence(input.runDir, convergence);
+  }
+  // Pause-and-exit runs have no interactive seam to collect a ruling: treat escalation exactly like
+  // autonomous mode (proceed on the O-2 fallback base → terminal `escalated` + decision record)
+  // instead of blocking on stdin or failing the run mid-protocol.
+  if (gating.pauseAndExit) {
+    return await persistConvergence(input.runDir, convergence);
   }
   if (!gating.ask) {
     throw new Error("gated arbitration requires an ask() seam but none was provided");
@@ -778,14 +802,57 @@ async function runArbitrationBoundary(
   await appendResolved(input.runDir, (await readManifest(input.runDir)).runId, [entry]);
   // The arbitrated result is now resolved by a human: status `agreed`, resolver `human`, the chosen
   // base + its author as integrator. The open decision is cleared (it was settled by the ruling).
-  return {
+  return await persistConvergence(input.runDir, {
     ...convergence,
     base: outcome.base,
     integrator: outcome.base,
     status: "agreed",
     resolver: "human",
     openDecision: undefined,
-  };
+  });
+}
+
+// The resolved convergence result, persisted at the arbitration boundary (the sequential seam that
+// ALWAYS runs after convergence). The machine holds the result only in context, so a run paused
+// AFTER evaluation (e.g. `mar resume --step` pausing at the integration→validation boundary) would
+// otherwise lose it across the resume — the terminal status would read `completed` for an escalated
+// run and the decision record would drop the open decision. File-on-disk mirrors the manifest's
+// re-derivation philosophy (D-54): context is transient, the run dir is the authority.
+const CONVERGENCE_FILE = "convergence.json";
+
+/** Persist the resolved convergence result (atomic tmp+rename, manifest.ts style). Returns it. */
+async function persistConvergence(
+  runDir: string,
+  convergence: ConvergenceResult,
+): Promise<ConvergenceResult> {
+  const finalPath = join(runDir, CONVERGENCE_FILE);
+  const tmpPath = `${finalPath}.tmp-${process.pid}`;
+  await writeFile(tmpPath, `${JSON.stringify(convergence, null, 2)}\n`, "utf8");
+  await rename(tmpPath, finalPath);
+  return convergence;
+}
+
+/**
+ * Re-derive a persisted convergence result for a resumed run whose machine context never ran the
+ * evaluation phase. Missing or unparseable file → undefined (the caller falls back to the
+ * no-convergence behavior it has today — never fail a finished run over a corrupt side file).
+ */
+async function readPersistedConvergence(runDir: string): Promise<ConvergenceResult | undefined> {
+  try {
+    const raw = await readFile(join(runDir, CONVERGENCE_FILE), "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      ((parsed as { status?: unknown }).status === "agreed" ||
+        (parsed as { status?: unknown }).status === "escalated")
+    ) {
+      return parsed as ConvergenceResult;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1080,8 +1147,13 @@ function buildMachine(resumePhase?: Phase["name"]) {
     // draft→promote→review chain. A fresh run omits resumePhase and starts at PHASES[0].
     initial: resumePhase ?? PHASES[0].name,
     // The roster is rehydrated from `input.roster` when present (resume: survivors vs. full original,
-    // D-57), else defaults to the configured roster for a fresh run.
-    context: ({ input }) => ({ input, roster: input.roster ?? input.config.agents }),
+    // D-57), else defaults to the configured roster for a fresh run. A resume-supplied feedback note
+    // (D-51) seeds the first phase's steering and is cleared once consumed, like an interactive note.
+    context: ({ input }) => ({
+      input,
+      roster: input.roster ?? input.config.agents,
+      feedback: input.feedback,
+    }),
     states: states as never,
   });
 }
@@ -1294,6 +1366,7 @@ export async function resumeProtocol(
   runDir: string,
   config: MarConfig,
   gating?: GatingOptions,
+  feedback?: string,
 ): Promise<number> {
   const manifest = await readManifest(runDir); // (1) manifest integrity — fails closed if corrupt.
 
@@ -1332,13 +1405,20 @@ export async function resumeProtocol(
     `↻ resuming run ${manifest.runId} at phase "${resumePhase.name}" with ${roster.length} agent(s)\n`,
   );
 
+  // A resume-supplied feedback note (D-51, `mar resume --feedback`) is persisted with attribution
+  // to `gate-feedback/<phase>.md` (auditable, same path as an interactively-collected note) and
+  // threaded into the machine so the resumed phase's prompt carries it — for exactly one phase.
+  if (feedback !== undefined && feedback.length > 0) {
+    await writeGateFeedback(runDir, resumePhase.name, feedback);
+  }
+
   // Re-derivation: rebuild the machine at the resume phase with the rehydrated roster (no snapshot).
   // Gating is threaded through so a resumed run can itself be gated; a bare `mar resume` continues
   // the run autonomously (gating omitted → no prompts), which is the expected "I already approved by
   // resuming" behavior. A re-paused run again writes `paused-awaiting-approval`.
   const machine = buildMachine(resumePhase.name);
   const actor = createActor(machine, {
-    input: { runDir, config, inputPath, roster, gating },
+    input: { runDir, config, inputPath, roster, gating, feedback },
   });
   actor.start();
   await toPromise(actor);
@@ -1349,8 +1429,13 @@ export async function resumeProtocol(
     return 0;
   }
   if (snapshot.value === "done") {
-    const escalated = snapshot.context.convergence?.status === "escalated";
-    await writeDecisionRecord(runDir, snapshot.context.convergence);
+    // A resume that started AFTER evaluation (e.g. the final `--step` running only validation) has
+    // no convergence in its machine context — re-derive the persisted result from the run dir so an
+    // escalated run keeps its `escalated` terminal status and its decision record keeps the open
+    // decision across the pause.
+    const convergence = snapshot.context.convergence ?? (await readPersistedConvergence(runDir));
+    const escalated = convergence?.status === "escalated";
+    await writeDecisionRecord(runDir, convergence);
     await setStatus(runDir, escalated ? "escalated" : "completed");
     return 0;
   }
