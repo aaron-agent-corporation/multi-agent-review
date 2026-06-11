@@ -82,6 +82,43 @@ in-process). A run whose convergence deadlocks ends with terminal status
 `escalated` — it still produces a merged fallback document plus the open decision
 in the decision record for a human to settle.
 
+## The input document
+
+The input is a single self-contained markdown file — the document you want
+stress-tested. Each agent receives an isolated working folder containing exactly two
+things: `input.md` (a copy of your document) and the seeded format-contract
+instruction file. That is their entire universe — no repo context, no conversation
+history, no global config. Each agent independently drafts its own treatment of
+whatever `input.md` asks for, and those competing drafts are what enter cross-review.
+
+Two ways to shape it, both supported (the protocol is generic over document type):
+
+1. **A draft you already have** — a proposal, spec, architecture doc, or plan. The
+   agents each produce their own improved version, and the adversarial loop surfaces
+   what your draft missed. This is the common case.
+2. **A brief / problem statement** — "Design X under these constraints…". The agents
+   each draft a solution from scratch. This maximizes independence, since no one
+   anchors on an existing draft.
+
+Because agents see *only* this file, anything not in it does not exist for them.
+Include the goal, the constraints that bound acceptable answers (budget, stack,
+compliance — whatever applies), the content itself, and any facts they would
+otherwise have to invent. Vague inputs produce confident-but-divergent drafts that
+burn convergence rounds arguing about assumptions you could have pinned down in one
+paragraph.
+
+A workable shape, at whatever length the subject needs:
+
+```markdown
+# Proposal: <what this is>
+
+## Summary        — what you're building / deciding and why
+## Goals          — measurable outcomes that define success
+## Proposed approach — the substance under review
+## Constraints    — budget, timeline, stack, compliance, jurisdiction
+## Risks / open questions — what you already suspect is weak
+```
+
 ## Claude Code plugin
 
 This repo is also a Claude Code plugin marketplace. Install:
