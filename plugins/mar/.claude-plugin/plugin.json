@@ -1,0 +1,8 @@
+{
+  "name": "mar",
+  "description": "Drive adversarial multi-vendor document reviews (mar) from Claude Code — launch gated runs, mediate phase gates, deliver the integrated result",
+  "version": "0.1.0",
+  "author": { "name": "The-Agent-Corporation" },
+  "repository": "https://github.com/The-Agent-Corporation/multi-agent-review",
+  "license": "MIT"
+}

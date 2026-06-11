@@ -40,8 +40,9 @@ plugins/mar/
 The skill resolves the CLI in order:
 
 1. `mar` on PATH (normal case after `npm link` / `npm i -g`).
-2. Fallback: `node "<this repo>/dist/src/cli.js"` — the skill documents the repo path;
-   if `dist/` is missing or stale it tells the user to run `npm run build`.
+2. Fallback: `node "$MAR_HOME/dist/src/cli.js"` when `MAR_HOME` points at a clone
+   (no hardcoded paths — the plugin is public); if neither resolves, the skill gives
+   clone+build+link instructions and stops.
 
 ## Skill behavior (`/mar-review <input> [--autonomous]`)
 
@@ -59,8 +60,8 @@ The skill resolves the CLI in order:
    It asks the user (structured question): **approve** / **feedback <note>** / **abort**.
 4. **Continue.** Relay the decision via the resume CLI (below) with the gated step
    flag, so the run pauses again at the next boundary. Loop until terminal status.
-   If convergence escalates to arbitration, present each agent's final position and
-   relay the user's ruling the same way.
+   If the run ends `escalated`, present each agent's final position from the decision
+   record and explain the interactive-ruling options (see arbitration note below).
 5. **Deliver.** Final digest: integrated document path, decision record summary
    (accepted/rejected counts, any escalations), and pointers into `runs/<id>/`.
 
@@ -79,17 +80,35 @@ needs three thin flags on `resume`:
 |------|--------|
 | `--step` | Resume with `{ mode: "gated", pauseAndExit: true }` — run exactly one phase, then pause again. (Name avoids overloading `--gated`, which on `run` implies an interactive TTY prompt.) |
 | `--feedback "<note>"` | Before resuming, persist the note via the existing `writeGateFeedback` path (`gate-feedback/<phase>.md`, D-51) and thread it into the resumed phase's prompt context. |
-| `--abort` | Mark the paused run `aborted` (terminal) without running anything. Mutually exclusive with `--step`/`--feedback`. |
-| `--ruling "<agent>"` | Resolve a run paused at an escalated arbitration: record the human ruling (choose that agent's position as base/integrator) through the existing `arbitrationLedgerEntry`/`writeHumanRuling` path, then continue. |
+| `--abort` | End the paused run without running anything: status `failed` with a human-attributed reason, mirroring the interactive abort path (there is no `aborted` enum member — interactive abort also routes to `failed`, engine.ts ~1044). Mutually exclusive with `--step`/`--feedback`; requires status `paused-awaiting-approval`. |
 
 **Arbitration under pause-and-exit (correctness fix, found in design review):** in gated
 mode the engine's arbitration boundary unconditionally calls the interactive `ask()`
 seam when convergence escalates (engine.ts ~770) — `pauseAndExit` is not consulted
-there, so a background `--pause-and-exit` run that escalates would block on stdin.
-The enhancement must make the arbitration boundary pause-and-exit aware: when
-`pauseAndExit` is set and convergence escalates, write `paused-awaiting-approval`
-(manifest records the pending arbitration) and exit 0; Claude then presents each
-agent's final position and relays the ruling via `mar resume --ruling`.
+there, so a `--pause-and-exit`/`--step` run that escalates would block on stdin (or
+throw if no `ask` seam was threaded). Fix: the arbitration boundary bypasses the human
+ruling when `pauseAndExit` is set, exactly like autonomous mode — the run proceeds on
+the O-2 fallback base and ends with the existing terminal status **`escalated`** plus
+a decision record. The skill then surfaces each agent's final position from the
+decision record and tells the user the run needs an interactive ruling (re-run
+`mar run --gated` in a terminal) or manual integration. A non-interactive `--ruling`
+flag is deferred — resolving a terminal-escalated run would require re-running the
+convergence loop (re-invoking agents), which is cost the v1 loop shouldn't hide.
+
+**Stepping granularity (found in implementation):** `--step` cannot pause at the
+evaluation→integration boundary: evaluation's terminal output (designated base +
+integrator) lives only in machine context, and `firstIncompletePhase` (D-54) treats
+evaluation as incomplete until an integration artifact exists — pausing there strands
+the run in an unresumable loop (each resume restarts convergence and re-pauses). So a
+pause-and-exit step carries evaluation THROUGH integration; a gated run pauses after
+draft, review, response, and integration. Interactive gated runs are unchanged.
+
+**Persisted convergence (found in implementation):** the resolved `ConvergenceResult`
+is written to `runs/<id>/convergence.json` at the arbitration boundary (atomic
+tmp+rename). Without it, a run that pauses after integration loses the convergence
+outcome across the resume — the terminal status would read `completed` for an
+escalated run and the decision record would drop the open decision. The resume
+terminal path falls back to the persisted result when machine context has none.
 
 Implementation notes:
 

@@ -1,0 +1,11 @@
+{
+  "name": "multi-agent-review",
+  "owner": { "name": "The-Agent-Corporation" },
+  "plugins": [
+    {
+      "name": "mar",
+      "source": "./plugins/mar",
+      "description": "Drive adversarial multi-vendor document reviews (mar) from Claude Code — launch gated runs, mediate phase gates, deliver the integrated result"
+    }
+  ]
+}
