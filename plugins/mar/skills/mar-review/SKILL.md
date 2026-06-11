@@ -13,7 +13,8 @@ the recorded artifacts (independence is the product).
 
 ## 1. Resolve the CLI
 
-Run `mar --version` (any exit-0 output means it resolves). If it does not resolve:
+Run `mar --help` (exit 0 means it resolves; the CLI defines no `--version` flag). If
+it does not resolve:
 
 - If `MAR_HOME` is set, use `node "$MAR_HOME/dist/src/cli.js"` everywhere `mar`
   appears below (build first with `npm run build` in `$MAR_HOME` if `dist/` is missing).
