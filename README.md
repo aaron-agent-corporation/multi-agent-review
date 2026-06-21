@@ -98,10 +98,17 @@ commits, and patch text. Without `--post`, nothing is sent to GitHub. With `--po
 the final integration artifact is submitted with `gh pr review --comment --body-file`
 after the run reaches a completed or escalated terminal state.
 
-The repository also includes a manual self-hosted GitHub Action,
+The repository also includes a self-hosted GitHub Action,
 `.github/workflows/mar-pr-review.yml`, that builds the CLI and runs the same command.
+It runs automatically on same-repository pull requests when they are opened,
+updated, reopened, or marked ready for review, and posts the unified review back to
+the PR. Draft PRs are skipped until ready-for-review. The manual dispatch path stays
+available for ad-hoc dry runs or explicit posts.
+
 Use a self-hosted runner that already has authenticated vendor CLIs available on PATH;
-GitHub-hosted runners do not satisfy the CLI-subscription constraint.
+GitHub-hosted runners do not satisfy the CLI-subscription constraint. The automatic
+workflow intentionally uses `pull_request`, not `pull_request_target`, and ignores
+forked PRs because it runs install/build scripts and local vendor CLIs on the runner.
 
 ## The input document
 

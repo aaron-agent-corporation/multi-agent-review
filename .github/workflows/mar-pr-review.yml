@@ -1,6 +1,10 @@
 name: MAR PR Review
 
 on:
+  # Do not switch this to pull_request_target: the job invokes local vendor CLIs
+  # and runs project install/build scripts on a self-hosted runner.
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
   workflow_dispatch:
     inputs:
       pr:
@@ -17,16 +21,37 @@ permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: mar-pr-review-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   review:
     name: Multi-agent PR review
     runs-on: self-hosted
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository) }}
     env:
-      PR_SELECTOR: ${{ inputs.pr }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve PR review mode
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DISPATCH_PR_SELECTOR: ${{ inputs.pr }}
+          DISPATCH_POST: ${{ inputs.post }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            printf 'PR_SELECTOR=%s\n' "$PR_NUMBER" >> "$GITHUB_ENV"
+            printf 'MAR_POST_REVIEW=true\n' >> "$GITHUB_ENV"
+          else
+            printf 'PR_SELECTOR=%s\n' "$DISPATCH_PR_SELECTOR" >> "$GITHUB_ENV"
+            printf 'MAR_POST_REVIEW=%s\n' "$DISPATCH_POST" >> "$GITHUB_ENV"
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -43,11 +68,11 @@ jobs:
       - name: Verify agent roster
         run: node dist/src/cli.js preflight
 
-      - name: Run PR review dry run
-        if: ${{ !inputs.post }}
-        run: node dist/src/cli.js pr review "$PR_SELECTOR" --autonomous
-
-      - name: Run and post PR review
-        if: ${{ inputs.post }}
-        run: node dist/src/cli.js pr review "$PR_SELECTOR" --post --autonomous
-
+      - name: Run PR review
+        shell: bash
+        run: |
+          if [[ "$MAR_POST_REVIEW" == "true" ]]; then
+            node dist/src/cli.js pr review "$PR_SELECTOR" --post --autonomous
+          else
+            node dist/src/cli.js pr review "$PR_SELECTOR" --autonomous
+          fi
