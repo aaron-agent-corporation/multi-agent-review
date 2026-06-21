@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import fsExtra from "fs-extra";
+import { type EvaluationCitation, EvaluationFrontmatter } from "../schema/evaluation.js";
 import type { ResolvedDecisionEntry } from "../schema/resolved-decisions.js";
 import { readManifest } from "../workspace/manifest.js";
 import type { ConvergenceResult } from "./converge.js";
@@ -153,7 +154,7 @@ export interface AgentPosition {
   author: string;
   proposedBase: string;
   remainingDisagreements: string[];
-  citations: string[];
+  citations: EvaluationCitation[];
 }
 
 /**
@@ -175,17 +176,14 @@ export async function readFinalPositions(runDir: string): Promise<AgentPosition[
     .map((a) => join(runDir, a.path));
   const positions: AgentPosition[] = [];
   for (const p of paths) {
-    const data = (await readAgentFrontmatter(p)) as Record<string, unknown> | null;
-    if (!data || typeof data.author !== "string" || typeof data.proposedBase !== "string") continue;
+    const data = await readAgentFrontmatter(p);
+    const parsed = EvaluationFrontmatter.safeParse(data);
+    if (!parsed.success) continue;
     positions.push({
-      author: data.author,
-      proposedBase: data.proposedBase,
-      remainingDisagreements: Array.isArray(data.remainingDisagreements)
-        ? (data.remainingDisagreements as unknown[]).map((d) => String(d))
-        : [],
-      citations: Array.isArray(data.citations)
-        ? (data.citations as unknown[]).map((c) => String(c))
-        : [],
+      author: parsed.data.author,
+      proposedBase: parsed.data.proposedBase,
+      remainingDisagreements: parsed.data.remainingDisagreements,
+      citations: parsed.data.citations,
     });
   }
   return positions;
@@ -206,7 +204,8 @@ function formatArbitrationPrompt(positions: AgentPosition[], reason: string): st
       lines.push(`       open: ${p.remainingDisagreements.join("; ")}`);
     }
     if (p.citations.length > 0) {
-      lines.push(`       cites: ${p.citations.join("; ")}`);
+      const cites = p.citations.map((c) => `${c.artifact}: ${c.evidence}`).join("; ");
+      lines.push(`       cites: ${cites}`);
     }
   }
   lines.push("  Pick a side by author name, OR type a free-form ruling.");

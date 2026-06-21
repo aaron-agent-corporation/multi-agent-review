@@ -274,9 +274,8 @@ function relitigationBody(author, args) {
  * Proves the seeded directive's target (the ledger) is actually available to a later-phase agent. A
  * best-effort no-op when the env is unset or the file is absent.
  *
- * Non-scoped phases run with the fixture's cwd inherited from the engine (the project workdir, not the
- * run dir), so the ledger lives at `runs/<id>/shared/resolved-decisions.md` relative to cwd — we scan
- * `runs/` for the (single, in these tests) run dir to read it.
+ * Non-scoped phases run with cwd set to the run dir, so the ledger is normally available directly
+ * at `shared/resolved-decisions.md`. The older project-cwd fallback is kept for fixture compatibility.
  */
 function maybeEchoLedger(author) {
   const dir = process.env.MAR_LEDGER_ECHO_DIR;
@@ -284,6 +283,10 @@ function maybeEchoLedger(author) {
   if (!dir || !id) return;
   let saw = false;
   try {
+    const direct = join("shared", "resolved-decisions.md");
+    if (existsSync(direct) && readFileSync(direct, "utf8").includes(id)) {
+      saw = true;
+    }
     let runIds = [];
     try {
       runIds = readdirSync("runs");
@@ -291,6 +294,7 @@ function maybeEchoLedger(author) {
       runIds = [];
     }
     for (const rid of runIds) {
+      if (saw) break;
       const p = join("runs", rid, "shared", "resolved-decisions.md");
       if (existsSync(p) && readFileSync(p, "utf8").includes(id)) {
         saw = true;

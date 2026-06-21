@@ -38,6 +38,7 @@ import {
   writeGateFeedback,
   writeHumanRuling,
 } from "./gating.js";
+import { seedInstructions } from "./instructions.js";
 import { PHASES, type Phase } from "./phases.js";
 import {
   appendResolved,
@@ -157,6 +158,14 @@ export async function runPhase(
 
   process.stdout.write(`▶ phase ${phase.name} — fanning out ${roster.length} agent(s)\n`);
 
+  // Shared phases run from the run directory so agents see only the review workspace (`shared/`,
+  // resolved decisions, and phase artifacts), not the source repo that launched mar. Seed each
+  // vendor-native instruction file there so the same format contract governs non-draft phases too.
+  if (!phase.scoped) {
+    const vendors = [...new Set(roster.map((entry) => entry.vendor))];
+    await Promise.all(vendors.map((vendor) => seedInstructions(runDir, vendor)));
+  }
+
   // One written artifact awaiting manifest indexing (agent tasks write FILES concurrently — those
   // are independent paths — but the manifest is appended SEQUENTIALLY below to avoid a concurrent
   // read-modify-write race on the single manifest.json).
@@ -184,14 +193,18 @@ export async function runPhase(
         ? injectFeedback(phase.prompt({ inputPath, phaseName: phase.name }), feedback)
         : phase.prompt({ inputPath, phaseName: phase.name });
       const promptRef = `phase:${phase.name}`;
-      // PROT-04: only the draft phase runs in an isolated per-agent cwd. The scoped draft artifact
+      // PROT-04: the draft phase runs in an isolated per-agent cwd. Shared phases run in runDir, so
+      // real CLIs cannot mutate the source repo that launched `mar`; they can only see the run
+      // workspace and the seeded format contract for their vendor.
+      //
+      // The scoped draft artifact
       // is also WRITTEN into that per-agent dir (`work/<agent>/`), so a peer can never read it from
-      // a shared location until promoteDrafts copies it at the boundary. Non-scoped phases write
-      // straight into the run dir (the shared workspace).
+      // a shared location until promoteDrafts copies it at the boundary. Shared phases write straight
+      // into the run dir.
       const cwd = phase.scoped
         ? await scopedWorkdir(runDir, entry.name, inputPath, entry.vendor)
-        : undefined;
-      const artifactDir = cwd ?? runDir;
+        : runDir;
+      const artifactDir = phase.scoped ? cwd : runDir;
 
       // One transport-retried turn for `promptText`, written to an artifact. Returns the written
       // artifact (ok) or a failure reason. The transport retry (withRetry / D-23) is DISTINCT from
@@ -260,7 +273,8 @@ export async function runPhase(
       // engine block FIRST — parsing the file would validate engine metadata, not the agent's
       // structured frontmatter. Parsing the agent text directly is the read that validates the
       // attacker-influenceable content (T-04-06). The raw turn JSON + wrapped .md are still on disk.
-      if (phase.validate) {
+      const validatePhase = phase.validate;
+      if (validatePhase) {
         // Tolerant reader (live-run hardening, 04-05 checkpoint): models — claude especially —
         // sometimes emit preamble prose before the artifact despite the contract's output-channel
         // rule. gray-matter only recognizes frontmatter at position 0, so when the direct parse
@@ -281,7 +295,7 @@ export async function runPhase(
         // with no feedback (observed live: gemini-1, run 20260605-MYPrO2).
         const safeValidate = (text: string): { ok: true } | { ok: false; errors: string } => {
           try {
-            return phase.validate!(parseFront(text));
+            return validatePhase(parseFront(text));
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return {

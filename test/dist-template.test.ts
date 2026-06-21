@@ -93,9 +93,7 @@ describe("npm run build copies the instruction template into dist (carry-over ga
       expect(existsSync(runsDir)).toBe(true);
       const runIds = readdirSync(runsDir);
       expect(runIds.length).toBe(1);
-      const manifest = JSON.parse(
-        readFileSync(join(runsDir, runIds[0], "manifest.json"), "utf8"),
-      );
+      const manifest = JSON.parse(readFileSync(join(runsDir, runIds[0], "manifest.json"), "utf8"));
       expect(manifest.status).toBe("completed");
     } finally {
       rmSync(work, { recursive: true, force: true });

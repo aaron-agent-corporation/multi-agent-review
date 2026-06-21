@@ -7,7 +7,7 @@ const VALID = {
   round: 1,
   proposedBase: "claude",
   remainingDisagreements: [],
-  citations: ["002-codex-review.md issue 3"],
+  citations: [{ artifact: "002-codex-review.md", evidence: "issue 3" }],
 };
 
 describe("EvaluationFrontmatter schema (REVW-03)", () => {

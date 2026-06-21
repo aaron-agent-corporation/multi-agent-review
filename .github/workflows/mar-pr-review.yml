@@ -1,0 +1,53 @@
+name: MAR PR Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number or URL to review
+        required: true
+        type: string
+      post:
+        description: Post the unified review back to GitHub
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Multi-agent PR review
+    runs-on: self-hosted
+    env:
+      PR_SELECTOR: ${{ inputs.pr }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build CLI
+        run: npm run build
+
+      - name: Verify agent roster
+        run: node dist/src/cli.js preflight
+
+      - name: Run PR review dry run
+        if: ${{ !inputs.post }}
+        run: node dist/src/cli.js pr review "$PR_SELECTOR" --autonomous
+
+      - name: Run and post PR review
+        if: ${{ inputs.post }}
+        run: node dist/src/cli.js pr review "$PR_SELECTOR" --post --autonomous
+

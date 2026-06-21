@@ -82,6 +82,27 @@ in-process). A run whose convergence deadlocks ends with terminal status
 `escalated` — it still produces a merged fallback document plus the open decision
 in the decision record for a human to settle.
 
+## GitHub PR review
+
+`mar` can turn a GitHub pull request into a protocol input, run the full multi-agent
+review loop, and write one unified review body:
+
+```sh
+mar pr review 42 --autonomous          # dry run: writes runs/<id>/github-review.md
+mar pr review 42 --gated               # pause at phase gates before continuing
+mar pr review https://github.com/org/repo/pull/42 --post --autonomous
+```
+
+The command uses the authenticated `gh` CLI to fetch PR metadata, changed files,
+commits, and patch text. Without `--post`, nothing is sent to GitHub. With `--post`,
+the final integration artifact is submitted with `gh pr review --comment --body-file`
+after the run reaches a completed or escalated terminal state.
+
+The repository also includes a manual self-hosted GitHub Action,
+`.github/workflows/mar-pr-review.yml`, that builds the CLI and runs the same command.
+Use a self-hosted runner that already has authenticated vendor CLIs available on PATH;
+GitHub-hosted runners do not satisfy the CLI-subscription constraint.
+
 ## The input document
 
 The input is a single self-contained markdown file — the document you want

@@ -7,6 +7,7 @@ import { loadConfig, resolveAgent } from "./config.js";
 import { assertReviewable } from "./gates.js";
 import { detectVendors, writeStarterConfig } from "./init.js";
 import { logInvocation } from "./log/invocation.js";
+import { runPullRequestReview } from "./pr-review.js";
 import { formatStatusLines, probeVersion, runPreflight } from "./preflight.js";
 import type { Ask, GatingOptions } from "./protocol/engine.js";
 import { resumeProtocol, runProtocol } from "./protocol/engine.js";
@@ -54,6 +55,10 @@ interface RunOptions {
   gated?: boolean;
   autonomous?: boolean;
   pauseAndExit?: boolean;
+}
+
+interface PullRequestReviewOptions extends RunOptions {
+  post?: boolean;
 }
 
 /**
@@ -438,6 +443,38 @@ async function runRun(input: string, opts: RunOptions = {}): Promise<number> {
   return await runProtocol(runDir, config, input, gating);
 }
 
+async function runPrReview(selector: string, opts: PullRequestReviewOptions = {}): Promise<number> {
+  let config: Awaited<ReturnType<typeof loadConfig>>;
+  try {
+    config = await loadConfig();
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+
+  try {
+    assertReviewable(config.agents);
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+
+  let gating: GatingOptions;
+  try {
+    gating = await resolveGating(opts, config.defaults.mode);
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+
+  try {
+    return await runPullRequestReview(selector, { config, gating, post: opts.post === true });
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
+  }
+}
+
 /**
  * `mar resume <run-id>` / `mar resume --last` — continue an interrupted/failed/paused run from its
  * last completed phase (PROT-06, D-55). THIN controller (02-05 thin-CLI rule): it loads the roster,
@@ -609,6 +646,26 @@ export function buildProgram(): Command {
     )
     .action(async (input: string, opts: RunOptions) => {
       process.exitCode = await runRun(input, opts);
+    });
+
+  const pr = program.command("pr").description("GitHub pull request workflows");
+
+  pr.command("review")
+    .description("Run the multi-agent protocol on a GitHub pull request")
+    .argument("<pr>", "pull request number, URL, or gh selector")
+    .option("--post", "post the unified review back to GitHub with gh pr review --comment")
+    .option(
+      "--mode <gated|autonomous>",
+      "execution mode (overrides the config + the run-start prompt)",
+    )
+    .option("--gated", "gated mode: pause at each phase boundary for approval")
+    .option("--autonomous", "autonomous mode: run unattended with no pauses")
+    .option(
+      "--pause-and-exit",
+      "gated only: pause at the first boundary, exit 0, resume with `mar resume`",
+    )
+    .action(async (selector: string, opts: PullRequestReviewOptions) => {
+      process.exitCode = await runPrReview(selector, opts);
     });
 
   program

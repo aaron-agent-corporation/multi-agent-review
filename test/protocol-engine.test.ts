@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,6 +135,80 @@ it("draft phase scopes each agent's cwd; drafts promoted to shared/ only after d
   const shared = readdirSync(join(runDir, "shared"));
   expect(shared).toContain("001-claude-draft.md");
   expect(shared).toContain("001-codex-draft.md");
+});
+
+it("non-draft phases run from the run directory with seeded instructions", async () => {
+  const cwdLog = join(workdir, "cwd.log");
+  const fixture = join(workdir, "cwd-fixture.mjs");
+  writeFileSync(
+    fixture,
+    `
+import { appendFileSync } from "node:fs";
+
+const args = process.argv.slice(2);
+const text = args.join("\\n");
+const phase = /\\[phase:([a-z]+)\\]/.exec(text)?.[1] ?? "unknown";
+const isCodex = args[0] === "exec";
+const author = isCodex ? "codex" : "claude";
+appendFileSync(process.env.CWD_LOG, \`\${author}|\${phase}|\${process.cwd()}\\n\`, "utf8");
+
+function artifact(kind) {
+  if (kind === "review") {
+    return \`---\\nphase: review\\nauthor: \${author}\\ntargets: peer\\nissues:\\n  - n: 1\\n    severity: P1\\n    question: "Question?"\\n---\\n\\n# Review\\n\`;
+  }
+  if (kind === "response") {
+    return \`---\\nphase: response\\nauthor: \${author}\\nreviewOf: peer-review\\nresponses:\\n  - issueRef: 1\\n    verdict: accept\\n---\\n\\n# Response\\n\`;
+  }
+  if (kind === "evaluation") {
+    return \`---\\nphase: evaluation\\nround: 1\\nauthor: \${author}\\nproposedBase: claude\\nremainingDisagreements: []\\ncitations: []\\n---\\n\\n# Evaluation\\n\`;
+  }
+  if (kind === "integration") {
+    return \`---\\nphase: integration\\nauthor: \${author}\\nbase: claude\\nadditions:\\n  - verdict: merged\\n    additionRef: issue-1\\n---\\n\\n# Integrated\\n\`;
+  }
+  return \`\${author}:\${kind}\\n\`;
+}
+
+const body = artifact(phase);
+if (isCodex) {
+  process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: body } }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");
+} else {
+  process.stdout.write(JSON.stringify({ is_error: false, result: body, duration_ms: 1 }));
+}
+`,
+    "utf8",
+  );
+  const config = baseConfig([
+    { name: "claude", vendor: "claude", bin: `node ${fixture}` },
+    { name: "codex", vendor: "codex", bin: `node ${fixture}` },
+  ]);
+
+  process.env.CWD_LOG = cwdLog;
+  const exit = await runProtocol(runDir, config, inputPath);
+  delete process.env.CWD_LOG;
+  expect(exit).toBe(0);
+
+  const rows = readFileSync(cwdLog, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const [author, phase, cwd] = line.split("|");
+      return { author, phase, cwd };
+    });
+  expect(
+    rows
+      .filter((row) => row.phase === "draft")
+      .map((row) => realpathSync(row.cwd))
+      .sort(),
+  ).toEqual([
+    realpathSync(join(runDir, "work", "claude")),
+    realpathSync(join(runDir, "work", "codex")),
+  ]);
+  const nonDraft = rows.filter((row) => row.phase !== "draft");
+  expect(nonDraft.length).toBeGreaterThan(0);
+  expect(nonDraft.every((row) => realpathSync(row.cwd) === realpathSync(runDir))).toBe(true);
+  expect(existsSync(join(runDir, "CLAUDE.md"))).toBe(true);
+  expect(existsSync(join(runDir, "AGENTS.md"))).toBe(true);
 });
 
 it("a failed agent leaving <2 distinct vendors fails the run -> status failed, does NOT advance", async () => {
