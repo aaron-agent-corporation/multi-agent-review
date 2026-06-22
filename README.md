@@ -136,6 +136,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  statuses: write
 
 concurrency:
   group: mar-pr-review-${{ github.event.pull_request.number || github.run_id }}
@@ -172,6 +173,9 @@ jobs:
 
 The target workflow intentionally passes the PR URL rather than just the number, so
 the action can run from the MAR checkout while reviewing the target repository.
+The action posts a `MAR multi-agent review` commit status to the PR head commit:
+`pending` while the review is running, then `success` or `failure` when the run
+finishes. `statuses: write` is required for that PR UI signal.
 
 ## The input document
 

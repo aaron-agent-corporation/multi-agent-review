@@ -19,6 +19,13 @@ describe("GitHub Action PR review wrapper", () => {
     expect(action).toContain("node dist/src/cli.js preflight");
     expect(action).toContain('node dist/src/cli.js "$' + '{args[@]}"');
     expect(action).toContain("GH_TOKEN: $" + "{{ inputs.github-token }}");
+    expect(action).toContain("PREFLIGHT: $" + "{{ inputs.preflight }}");
+    expect(action).toContain("gh pr view");
+    expect(action).toContain("headRefOid");
+    expect(action).toContain("repos/$" + "{GITHUB_REPOSITORY}/statuses/$" + "{status_sha}");
+    expect(action).toContain("MAR multi-agent review");
+    expect(action).toContain("MAR multi-agent review in progress");
+    expect(action).toContain("statuses: write");
   });
 
   it("is an automatic and manual self-hosted wrapper around the built mar CLI", () => {
@@ -29,6 +36,7 @@ describe("GitHub Action PR review wrapper", () => {
     expect(workflow).toContain("types: [opened, reopened, synchronize, ready_for_review]");
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("pr:");
+    expect(workflow).toContain("statuses: write");
     expect(workflow).toContain("cancel-in-progress: true");
     expect(workflow).toContain("runs-on: self-hosted");
     expect(workflow).toContain("!github.event.pull_request.draft");
@@ -37,10 +45,9 @@ describe("GitHub Action PR review wrapper", () => {
     );
     expect(workflow).toContain("Resolve PR review mode");
     expect(workflow).toContain("MAR_POST_REVIEW=true");
-    expect(workflow).toContain("npm ci");
-    expect(workflow).toContain("npm run build");
-    expect(workflow).toContain('node dist/src/cli.js pr review "$PR_SELECTOR" --autonomous');
-    expect(workflow).toContain('node dist/src/cli.js pr review "$PR_SELECTOR" --post --autonomous');
-    expect(workflow).toContain("GH_TOKEN: $" + "{{ github.token }}");
+    expect(workflow).toContain("uses: ./");
+    expect(workflow).toContain("pr: $" + "{{ env.PR_SELECTOR }}");
+    expect(workflow).toContain("post: $" + "{{ env.MAR_POST_REVIEW }}");
+    expect(workflow).toContain("github-token: $" + "{{ github.token }}");
   });
 });

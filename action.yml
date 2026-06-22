@@ -39,14 +39,6 @@ runs:
       working-directory: ${{ github.action_path }}
       run: npm run build
 
-    - name: Verify agent roster
-      if: ${{ inputs.preflight == 'true' }}
-      shell: bash
-      working-directory: ${{ github.action_path }}
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-      run: node dist/src/cli.js preflight
-
     - name: Run PR review
       shell: bash
       working-directory: ${{ github.action_path }}
@@ -54,12 +46,64 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         MAR_MODE: ${{ inputs.mode }}
         POST_REVIEW: ${{ inputs.post }}
+        PREFLIGHT: ${{ inputs.preflight }}
         PR_SELECTOR: ${{ inputs.pr }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
+        set -uo pipefail
+
+        status_sha=""
+        status_context="MAR multi-agent review"
+
+        set_mar_status() {
+          local state="$1"
+          local description="$2"
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${status_sha}" \
+            -f "state=${state}" \
+            -f "context=${status_context}" \
+            -f "description=${description}" \
+            -f "target_url=${RUN_URL}" \
+            >/dev/null
+        }
+
+        finish_status() {
+          local code=$?
+          if [[ -n "$status_sha" ]]; then
+            if [[ "$code" -eq 0 ]]; then
+              set_mar_status success "MAR multi-agent review completed" || true
+            else
+              set_mar_status failure "MAR multi-agent review failed" || true
+            fi
+          fi
+          exit "$code"
+        }
+
+        status_sha="$(gh pr view "$PR_SELECTOR" --json headRefOid --jq .headRefOid)"
+        if [[ -z "$status_sha" ]]; then
+          echo "::error::Unable to resolve PR head SHA for selector: $PR_SELECTOR"
+          exit 2
+        fi
+
+        if ! set_mar_status pending "MAR multi-agent review in progress"; then
+          echo "::error::Unable to create MAR pending status. Add 'statuses: write' to workflow permissions."
+          exit 2
+        fi
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        trap finish_status EXIT
+
+        set -e
+
         case "$MAR_MODE" in
           autonomous|gated) ;;
           *) echo "mode must be autonomous or gated, got: $MAR_MODE" >&2; exit 2 ;;
         esac
+
+        if [[ "$PREFLIGHT" == "true" ]]; then
+          node dist/src/cli.js preflight
+        fi
 
         args=(pr review "$PR_SELECTOR" "--$MAR_MODE")
         if [[ "$POST_REVIEW" == "true" ]]; then
