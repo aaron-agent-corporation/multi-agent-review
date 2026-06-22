@@ -110,6 +110,69 @@ GitHub-hosted runners do not satisfy the CLI-subscription constraint. The automa
 workflow intentionally uses `pull_request`, not `pull_request_target`, and ignores
 forked PRs because it runs install/build scripts and local vendor CLIs on the runner.
 
+### Install in another repository
+
+Target repositories can use this repository as a reusable composite action. Add this
+workflow to the target repo as `.github/workflows/mar-pr-review.yml`:
+
+```yaml
+name: MAR PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number or URL to review
+        required: true
+        type: string
+      post:
+        description: Post the unified review back to GitHub
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: mar-pr-review-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Multi-agent PR review
+    runs-on: self-hosted
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository) }}
+    steps:
+      - name: Resolve PR review mode
+        shell: bash
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          DISPATCH_PR_SELECTOR: ${{ inputs.pr }}
+          DISPATCH_POST: ${{ inputs.post }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            printf 'PR_SELECTOR=%s\n' "$PR_URL" >> "$GITHUB_ENV"
+            printf 'MAR_POST_REVIEW=true\n' >> "$GITHUB_ENV"
+          else
+            printf 'PR_SELECTOR=%s\n' "$DISPATCH_PR_SELECTOR" >> "$GITHUB_ENV"
+            printf 'MAR_POST_REVIEW=%s\n' "$DISPATCH_POST" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run MAR review
+        uses: aaron-agent-corporation/multi-agent-review@main
+        with:
+          pr: ${{ env.PR_SELECTOR }}
+          post: ${{ env.MAR_POST_REVIEW }}
+          github-token: ${{ github.token }}
+```
+
+The target workflow intentionally passes the PR URL rather than just the number, so
+the action can run from the MAR checkout while reviewing the target repository.
+
 ## The input document
 
 The input is a single self-contained markdown file — the document you want

@@ -2,9 +2,25 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+const actionPath = "action.yml";
 const workflowPath = join(".github", "workflows", "mar-pr-review.yml");
 
 describe("GitHub Action PR review wrapper", () => {
+  it("exposes a composite action that target repositories can call", () => {
+    expect(existsSync(actionPath)).toBe(true);
+    const action = readFileSync(actionPath, "utf8");
+
+    expect(action).toContain("using: composite");
+    expect(action).toContain("pr:");
+    expect(action).toContain("github-token:");
+    expect(action).toContain("working-directory: $" + "{{ github.action_path }}");
+    expect(action).toContain("npm ci");
+    expect(action).toContain("npm run build");
+    expect(action).toContain("node dist/src/cli.js preflight");
+    expect(action).toContain('node dist/src/cli.js "$' + '{args[@]}"');
+    expect(action).toContain("GH_TOKEN: $" + "{{ inputs.github-token }}");
+  });
+
   it("is an automatic and manual self-hosted wrapper around the built mar CLI", () => {
     expect(existsSync(workflowPath)).toBe(true);
     const workflow = readFileSync(workflowPath, "utf8");

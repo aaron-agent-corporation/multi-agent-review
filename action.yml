@@ -1,0 +1,69 @@
+name: Multi-Agent PR Review
+description: Run the MAR multi-agent pull request review protocol from a target repository.
+
+inputs:
+  pr:
+    description: Pull request number, URL, or gh selector to review.
+    required: true
+  post:
+    description: Post the unified review back to GitHub.
+    required: false
+    default: "true"
+  mode:
+    description: MAR execution mode, either autonomous or gated.
+    required: false
+    default: autonomous
+  preflight:
+    description: Run `mar preflight` before reviewing.
+    required: false
+    default: "true"
+  github-token:
+    description: GitHub token used by gh to read and post pull request reviews.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Install MAR dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm ci
+
+    - name: Build MAR CLI
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm run build
+
+    - name: Verify agent roster
+      if: ${{ inputs.preflight == 'true' }}
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: node dist/src/cli.js preflight
+
+    - name: Run PR review
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        MAR_MODE: ${{ inputs.mode }}
+        POST_REVIEW: ${{ inputs.post }}
+        PR_SELECTOR: ${{ inputs.pr }}
+      run: |
+        case "$MAR_MODE" in
+          autonomous|gated) ;;
+          *) echo "mode must be autonomous or gated, got: $MAR_MODE" >&2; exit 2 ;;
+        esac
+
+        args=(pr review "$PR_SELECTOR" "--$MAR_MODE")
+        if [[ "$POST_REVIEW" == "true" ]]; then
+          args+=(--post)
+        fi
+
+        node dist/src/cli.js "${args[@]}"
