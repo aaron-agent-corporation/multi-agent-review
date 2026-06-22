@@ -2,18 +2,19 @@ import type { AgentAdapter } from "./adapter.js";
 import { makeClaudeAdapter } from "./claude.js";
 import { makeCodexAdapter } from "./codex.js";
 import { makeGeminiAdapter } from "./gemini.js";
+import { makeGrokAdapter } from "./grok.js";
 
 /**
  * The vendor → adapter-factory map: the ORCH-03 seam. Adding a vendor is ONE entry here and zero
  * protocol-layer change (the protocol programs against the unchanged `AgentAdapter` contract). The
  * key set IS the supported-vendor set; `keyof typeof FACTORIES` rejects an invalid vendor at the
- * type boundary. Each factory defaults its own bin (`"claude"`/`"codex"`/`"gemini"`) and captures
- * an optional `model` in closure.
+ * type boundary. Each factory defaults its own bin and captures an optional `model` in closure.
  */
 export const FACTORIES = {
   claude: makeClaudeAdapter,
   codex: makeCodexAdapter,
   gemini: makeGeminiAdapter,
+  grok: makeGrokAdapter,
 } as const;
 
 /**

@@ -3,6 +3,7 @@ import {
   classifyClaude,
   classifyCodex,
   classifyGemini,
+  classifyGrok,
   DEFAULT_RETRIES,
   withRetry,
 } from "../src/retry.js";
@@ -102,8 +103,20 @@ describe("classifyClaude (D-22)", () => {
   });
 });
 
+describe("classifyGrok (xAI Grok Build)", () => {
+  it("fatal for login/API-key errors", () => {
+    expect(classifyGrok(turn({ error: "Authentication required: run grok login" }))).toBe("fatal");
+    expect(classifyGrok(turn({ error: "Invalid API key" }))).toBe("fatal");
+  });
+
+  it("transient for rate limits and overloads", () => {
+    expect(classifyGrok(turn({ error: "429 Too Many Requests" }))).toBe("transient");
+    expect(classifyGrok(turn({ error: "service overloaded" }))).toBe("transient");
+  });
+});
+
 describe("classification edge cases (D-22) — shared across vendors", () => {
-  for (const classify of [classifyCodex, classifyGemini, classifyClaude]) {
+  for (const classify of [classifyCodex, classifyGemini, classifyClaude, classifyGrok]) {
     it(`${classify.name}: timedOut TurnResult is transient (a hang is retryable)`, () => {
       expect(classify(turn({ timedOut: true, error: "timeout" }))).toBe("transient");
     });

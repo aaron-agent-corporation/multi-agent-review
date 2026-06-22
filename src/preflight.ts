@@ -9,6 +9,7 @@ import {
   classifyClaude,
   classifyCodex,
   classifyGemini,
+  classifyGrok,
   withRetry,
 } from "./retry.js";
 import type { AgentEntry } from "./schema/config.js";
@@ -105,6 +106,7 @@ const CLASSIFY: Record<AgentEntry["vendor"], Classify> = {
   claude: classifyClaude,
   codex: classifyCodex,
   gemini: classifyGemini,
+  grok: classifyGrok,
 };
 
 /**
@@ -124,6 +126,8 @@ function hintFor(vendor: AgentEntry["vendor"], stage: "install" | "probe"): stri
       return "codex probe failed (auth/responsiveness): run: codex login";
     case "claude":
       return "claude probe failed (auth/responsiveness): run: claude /login";
+    case "grok":
+      return "grok probe failed (auth/responsiveness): run: grok login, or export XAI_API_KEY / GROK_API_KEY";
   }
 }
 

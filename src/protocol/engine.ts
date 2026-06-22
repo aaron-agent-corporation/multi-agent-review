@@ -12,6 +12,7 @@ import {
   classifyClaude,
   classifyCodex,
   classifyGemini,
+  classifyGrok,
   withRetry,
 } from "../retry.js";
 import type { AgentEntry, MarConfig } from "../schema/config.js";
@@ -53,6 +54,7 @@ const CLASSIFY: Record<AgentEntry["vendor"], Classify> = {
   claude: classifyClaude,
   codex: classifyCodex,
   gemini: classifyGemini,
+  grok: classifyGrok,
 };
 
 /**

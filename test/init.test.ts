@@ -41,13 +41,14 @@ describe("detectVendors (PATH walk, no shell)", () => {
   it("returns only the vendors whose binary is on the injected PATH", () => {
     stub("codex");
     stub("gemini");
+    stub("grok");
     process.env.PATH = binDir; // ONLY our temp dir — real claude/codex/gemini invisible
     const vendors = detectVendors();
-    expect(vendors).toEqual(["codex", "gemini"]);
+    expect(vendors).toEqual(["codex", "gemini", "grok"]);
     expect(vendors).not.toContain("claude");
   });
 
-  it("returns an empty list when PATH holds none of the three", () => {
+  it("returns an empty list when PATH holds none of the supported vendors", () => {
     process.env.PATH = join(work, "empty"); // nonexistent dir
     expect(detectVendors()).toEqual([]);
   });
@@ -56,11 +57,11 @@ describe("detectVendors (PATH walk, no shell)", () => {
 describe("writeStarterConfig (atomic, MarConfig-valid)", () => {
   it("writes one agent per vendor with deterministic names + defaults, re-parsing through MarConfig", async () => {
     const p = join(work, "mar.config.json");
-    await writeStarterConfig(p, ["claude", "codex", "gemini"]);
+    await writeStarterConfig(p, ["claude", "codex", "gemini", "grok"]);
     const raw = readFileSync(p, "utf8");
     const cfg = MarConfig.parse(JSON.parse(raw));
-    expect(cfg.agents.map((x) => x.name)).toEqual(["claude-1", "codex-1", "gemini-1"]);
-    expect(cfg.agents.map((x) => x.vendor)).toEqual(["claude", "codex", "gemini"]);
+    expect(cfg.agents.map((x) => x.name)).toEqual(["claude-1", "codex-1", "gemini-1", "grok-1"]);
+    expect(cfg.agents.map((x) => x.vendor)).toEqual(["claude", "codex", "gemini", "grok"]);
     expect(cfg.defaults.timeoutMs).toBe(600_000);
     expect(cfg.defaults.retries).toBe(2);
   });

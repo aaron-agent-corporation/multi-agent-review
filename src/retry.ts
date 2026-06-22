@@ -69,6 +69,14 @@ export function classifyClaude(t: TurnResult): Classification {
   return classify(t, CLAUDE_FATAL);
 }
 
+/** Grok fatal tokens: login/API-key state. Rate limits and overloads are transient via COMMON. */
+const GROK_FATAL =
+  /(authentication required|run grok login|not logged in|unauthorized|invalid api key|xai_api_key|grok_api_key)/i;
+
+export function classifyGrok(t: TurnResult): Classification {
+  return classify(t, GROK_FATAL);
+}
+
 /** Default retry budget (D-23): 2 retries == 3 total attempts. */
 export const DEFAULT_RETRIES = 2;
 /** Default exponential-backoff base (~15s) and cap (~60s) per D-23. */

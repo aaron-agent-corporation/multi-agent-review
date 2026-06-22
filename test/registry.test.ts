@@ -5,6 +5,7 @@ import type { TurnRequest } from "../src/adapters/adapter.js";
 import { makeAdapter } from "../src/adapters/registry.js";
 
 const CODEX_FIXTURE = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
+const GROK_FIXTURE = fileURLToPath(new URL("./fixtures/fake-grok.mjs", import.meta.url));
 
 function req(promptText: string, timeoutMs = 5000): TurnRequest {
   return { agent: "codex", promptText, runDir: "runs/test", seq: 1, timeoutMs };
@@ -15,11 +16,19 @@ describe("makeAdapter registry (ORCH-03 seam)", () => {
     expect(makeAdapter("claude").name).toBe("claude");
     expect(makeAdapter("codex").name).toBe("codex");
     expect(makeAdapter("gemini").name).toBe("gemini");
+    expect(makeAdapter("grok").name).toBe("grok");
   });
 
   it("threads a bin override through to the factory", async () => {
     const adapter = makeAdapter("codex", CODEX_FIXTURE);
     const r = await adapter.invoke(req("ping"));
+    expect(r.ok).toBe(true);
+    expect(r.text).toBe("pong");
+  });
+
+  it("threads a bin override through to the grok factory", async () => {
+    const adapter = makeAdapter("grok", GROK_FIXTURE);
+    const r = await adapter.invoke({ ...req("ping"), agent: "grok" });
     expect(r.ok).toBe(true);
     expect(r.text).toBe("pong");
   });
@@ -49,8 +58,8 @@ describe("makeAdapter registry (ORCH-03 seam)", () => {
     vi.resetModules();
   });
 
-  it("FACTORIES exposes exactly the three vendor keys (adding a vendor = one map entry)", async () => {
+  it("FACTORIES exposes exactly the four vendor keys (adding a vendor = one map entry)", async () => {
     const mod = await import("../src/adapters/registry.js");
-    expect(Object.keys(mod.FACTORIES).sort()).toEqual(["claude", "codex", "gemini"]);
+    expect(Object.keys(mod.FACTORIES).sort()).toEqual(["claude", "codex", "gemini", "grok"]);
   });
 });

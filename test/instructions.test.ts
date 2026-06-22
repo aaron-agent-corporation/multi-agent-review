@@ -52,6 +52,7 @@ describe("scopedWorkdir seeds each agent's vendor-native instruction file (D-37)
     ["claude", "CLAUDE.md"],
     ["codex", "AGENTS.md"],
     ["gemini", "GEMINI.md"],
+    ["grok", "AGENTS.md"],
   ];
 
   for (const [vendor, filename] of cases) {
@@ -69,11 +70,12 @@ describe("scopedWorkdir seeds each agent's vendor-native instruction file (D-37)
     });
   }
 
-  it("VENDOR_FILE maps the three vendors to their native filenames", () => {
+  it("VENDOR_FILE maps the supported vendors to their native filenames", () => {
     expect(VENDOR_FILE).toEqual({
       claude: "CLAUDE.md",
       codex: "AGENTS.md",
       gemini: "GEMINI.md",
+      grok: "AGENTS.md",
     });
   });
 });

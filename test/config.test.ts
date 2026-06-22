@@ -30,8 +30,16 @@ describe("MarConfig schema (discriminated union + defaults)", () => {
     expect(cfg.defaults.timeoutMs).toBe(600_000);
   });
 
+  it("accepts grok as a supported fourth reviewer vendor", () => {
+    const cfg = MarConfig.parse({
+      agents: [{ name: "grok-build-1", vendor: "grok", model: "grok-build" }],
+    });
+    expect(cfg.agents[0].vendor).toBe("grok");
+    expect(cfg.agents[0].model).toBe("grok-build");
+  });
+
   it("rejects an unknown vendor with a clear discriminated-union error", () => {
-    const r = MarConfig.safeParse({ agents: [{ name: "g1", vendor: "grok" }] });
+    const r = MarConfig.safeParse({ agents: [{ name: "x1", vendor: "llama" }] });
     expect(r.success).toBe(false);
     if (!r.success) {
       const msg = r.error.issues.map((i) => i.message).join(" ");

@@ -64,6 +64,36 @@ export const GeminiJson = z
 export type GeminiJson = z.infer<typeof GeminiJson>;
 
 /**
+ * Raw `grok -p --output-format json` shape. The xAI docs guarantee a final JSON object for
+ * `--output-format json`; the exact text field may drift, so the adapter accepts the common
+ * `response`/`result`/`text` spellings and normalizes back to TurnResult. Grok-specific fields
+ * MUST NOT leak past the adapter boundary (D-12).
+ */
+export const GrokJson = z
+  .object({
+    response: z.string().optional(),
+    result: z.string().optional(),
+    text: z.string().optional(),
+    session_id: z.string().optional(),
+    sessionId: z.string().optional(),
+    error: z
+      .union([
+        z.string(),
+        z
+          .object({
+            message: z.string().optional(),
+            type: z.string().optional(),
+            code: z.union([z.string(), z.number()]).optional(),
+          })
+          .passthrough(),
+      ])
+      .optional(),
+  })
+  .passthrough();
+
+export type GrokJson = z.infer<typeof GrokJson>;
+
+/**
  * Vendor-agnostic normalized result the protocol layer sees (D-12). No claude-specific
  * field names — camelCase metadata only. `text` is "" on failure.
  */

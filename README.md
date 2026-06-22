@@ -2,9 +2,9 @@
 
 Vendor-neutral orchestration of frontier-model CLIs through a structured adversarial
 review protocol. Differently-trained models catch each other's blind spots — `mar`
-runs Claude Code, Codex CLI, and Gemini CLI (extensible to more) through a 6-phase
-review of any document, preserving genuine independence between agents while
-eliminating the human copy-paste relay.
+runs Claude Code, Codex CLI, Gemini CLI, and xAI Grok Build (extensible to more)
+through a 6-phase review of any document, preserving genuine independence between
+agents while eliminating the human copy-paste relay.
 
 ## The protocol
 
@@ -36,8 +36,8 @@ Design invariants worth knowing:
 - **Filesystem as the message bus.** Turn-based and artifact-based by design — no
   real-time agent chat, no message broker, no MCP coordination.
 - **Coordination lives outside every vendor's runtime.** `mar` drives the CLIs you
-  already have installed and authenticated (`claude`, `codex`, `gemini`); it never
-  calls vendor APIs.
+  already have installed and authenticated (`claude`, `codex`, `gemini`, `grok`);
+  it never calls vendor APIs.
 - **Resumable by re-derivation.** Interrupted, failed, and gate-paused runs resume
   from the on-disk trail (never a serialized state snapshot), with integrity
   re-validation before continuing.

@@ -9,7 +9,7 @@ import { z } from "zod";
  */
 export const PreflightResult = z.object({
   name: z.string(),
-  vendor: z.enum(["claude", "codex", "gemini"]),
+  vendor: z.enum(["claude", "codex", "gemini", "grok"]),
   installed: z.boolean(),
   version: z.string().optional(),
   responsive: z.boolean(),

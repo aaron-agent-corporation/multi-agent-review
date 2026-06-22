@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The vendors whose native instruction file we seed. Mirrors the canonical preflight enum. */
-export type Vendor = "claude" | "codex" | "gemini";
+export type Vendor = "claude" | "codex" | "gemini" | "grok";
 
 /**
  * Each vendor reads a different native instruction filename from its working directory
@@ -14,6 +14,7 @@ export const VENDOR_FILE: Record<Vendor, string> = {
   claude: "CLAUDE.md",
   codex: "AGENTS.md",
   gemini: "GEMINI.md",
+  grok: "AGENTS.md",
 };
 
 // Resolve the template RELATIVE TO THIS MODULE, never relative to the process cwd: a run

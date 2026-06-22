@@ -61,4 +61,11 @@ describe("adapter execa options pin stdin:'ignore' (02-05 codex-hang fix)", () =
     await makeClaudeAdapter("claude").invoke(req("ping"));
     expect(calls[0].opts.stdin).toBe("ignore");
   });
+
+  it("grok adapter passes stdin:'ignore'", async () => {
+    const calls = mockExeca(JSON.stringify({ response: "pong" }));
+    const { makeGrokAdapter } = await import("../src/adapters/grok.js");
+    await makeGrokAdapter("grok").invoke(req("ping"));
+    expect(calls[0].opts.stdin).toBe("ignore");
+  });
 });

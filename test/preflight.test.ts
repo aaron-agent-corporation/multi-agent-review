@@ -13,6 +13,7 @@ import { PreflightCache } from "../src/schema/preflight.js";
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
 const FAKE_GEMINI = fileURLToPath(new URL("./fixtures/fake-gemini.mjs", import.meta.url));
+const FAKE_GROK = fileURLToPath(new URL("./fixtures/fake-grok.mjs", import.meta.url));
 
 let workdir: string;
 let cwd0: string;
@@ -40,6 +41,10 @@ describe("extractVersion — per-vendor semver extraction (Pitfall 2)", () => {
 
   it("extracts the bare gemini semver", () => {
     expect(extractVersion("0.45.0")).toBe("0.45.0");
+  });
+
+  it("extracts the grok semver from a labeled version string", () => {
+    expect(extractVersion("grok 0.1.0")).toBe("0.1.0");
   });
 
   it("returns 'unknown' on empty or garbage input", () => {
@@ -162,6 +167,17 @@ describe("runPreflight — tiered check + probe + hints", () => {
     );
     expect(results[0].responsive).toBe(false);
     expect(results[0].hint ?? "").toMatch(/codex login/i);
+  });
+
+  it("grok probe auth-fail -> responsive:false + actionable grok login/API-key hint", async () => {
+    const { results, allPass } = await runPreflight(
+      [{ name: "grok-build-1", vendor: "grok", bin: FAKE_GROK, model: "grok-build" }],
+      { probePrompt: "--fail-auth" },
+    );
+    expect(results[0].installed).toBe(true);
+    expect(results[0].responsive).toBe(false);
+    expect(results[0].hint ?? "").toMatch(/grok login|GROK_API_KEY|XAI_API_KEY/);
+    expect(allPass).toBe(false);
   });
 
   it("a bin NOT on PATH → installed:false, responsive:false, install hint", async () => {

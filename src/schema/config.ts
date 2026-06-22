@@ -22,6 +22,7 @@ const Agent = z.discriminatedUnion("vendor", [
   z.object({ vendor: z.literal("claude"), ...Base }),
   z.object({ vendor: z.literal("codex"), ...Base }),
   z.object({ vendor: z.literal("gemini"), ...Base }),
+  z.object({ vendor: z.literal("grok"), ...Base }),
 ]);
 
 /**

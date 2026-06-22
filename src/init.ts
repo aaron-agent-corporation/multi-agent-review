@@ -6,7 +6,7 @@ import { type MarConfig, MarConfig as MarConfigSchema } from "./schema/config.js
 const { rename, writeFile } = fsExtra;
 
 /** The vendors `mar init` probes for, in deterministic order. */
-const VENDORS = ["claude", "codex", "gemini"] as const;
+const VENDORS = ["claude", "codex", "gemini", "grok"] as const;
 type Vendor = (typeof VENDORS)[number];
 
 /**

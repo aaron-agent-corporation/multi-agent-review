@@ -11,6 +11,11 @@
     {
       "vendor": "gemini",
       "name": "gemini-1"
+    },
+    {
+      "vendor": "grok",
+      "name": "grok-build-1",
+      "model": "grok-build"
     }
   ],
   "defaults": {

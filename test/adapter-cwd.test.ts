@@ -41,6 +41,7 @@ const SCOPED = "/tmp/work/a";
 const CLAUDE_OK = JSON.stringify({ is_error: false, result: "pong" });
 const CODEX_OK = `${JSON.stringify({ type: "turn.completed" })}\n`;
 const GEMINI_OK = JSON.stringify({ response: "pong" });
+const GROK_OK = JSON.stringify({ response: "pong" });
 
 afterEach(() => {
   vi.resetModules();
@@ -87,6 +88,20 @@ describe("adapters thread req.cwd into execa only when set (PROT-04 seam)", () =
     const calls = mockExeca(GEMINI_OK);
     const { makeGeminiAdapter } = await import("../src/adapters/gemini.js");
     await makeGeminiAdapter("gemini").invoke(req("ping"));
+    expect(calls[0].opts.cwd).toBeUndefined();
+  });
+
+  it("grok adapter passes cwd when set", async () => {
+    const calls = mockExeca(GROK_OK);
+    const { makeGrokAdapter } = await import("../src/adapters/grok.js");
+    await makeGrokAdapter("grok").invoke(req("ping", SCOPED));
+    expect(calls[0].opts.cwd).toBe(SCOPED);
+  });
+
+  it("grok adapter omits cwd when unset (undefined)", async () => {
+    const calls = mockExeca(GROK_OK);
+    const { makeGrokAdapter } = await import("../src/adapters/grok.js");
+    await makeGrokAdapter("grok").invoke(req("ping"));
     expect(calls[0].opts.cwd).toBeUndefined();
   });
 

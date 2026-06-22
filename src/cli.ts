@@ -17,6 +17,7 @@ import {
   classifyClaude,
   classifyCodex,
   classifyGemini,
+  classifyGrok,
   withRetry,
 } from "./retry.js";
 import type { AgentEntry } from "./schema/config.js";
@@ -115,6 +116,7 @@ const CLASSIFY: Record<AgentEntry["vendor"], Classify> = {
   claude: classifyClaude,
   codex: classifyCodex,
   gemini: classifyGemini,
+  grok: classifyGrok,
 };
 
 /**
@@ -353,7 +355,7 @@ async function runInit(): Promise<number> {
   const vendors = detectVendors();
   if (vendors.length === 0) {
     process.stderr.write(
-      "error: no supported vendor CLI (claude/codex/gemini) found on PATH — install one and re-run `mar init`\n",
+      "error: no supported vendor CLI (claude/codex/gemini/grok) found on PATH — install one and re-run `mar init`\n",
     );
     return 1;
   }
