@@ -24,6 +24,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Check out target repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
     - name: Set up Node
       uses: actions/setup-node@v4
       with:
@@ -41,9 +46,10 @@ runs:
 
     - name: Run PR review
       shell: bash
-      working-directory: ${{ github.action_path }}
+      working-directory: ${{ github.workspace }}
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        MAR_CONFIG: ${{ github.action_path }}/mar.config.json
         MAR_MODE: ${{ inputs.mode }}
         POST_REVIEW: ${{ inputs.post }}
         PREFLIGHT: ${{ inputs.preflight }}
@@ -152,12 +158,12 @@ runs:
         esac
 
         if [[ "$PREFLIGHT" == "true" ]]; then
-          node dist/src/cli.js preflight
+          node "${GITHUB_ACTION_PATH}/dist/src/cli.js" preflight --config "$MAR_CONFIG"
         fi
 
-        args=(pr review "$PR_SELECTOR" "--$MAR_MODE")
+        args=(pr review "$PR_SELECTOR" --config "$MAR_CONFIG" "--$MAR_MODE")
         if [[ "$POST_REVIEW" == "true" ]]; then
           args+=(--post)
         fi
 
-        node dist/src/cli.js "${args[@]}"
+        node "${GITHUB_ACTION_PATH}/dist/src/cli.js" "${args[@]}"

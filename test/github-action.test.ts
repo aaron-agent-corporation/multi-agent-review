@@ -14,11 +14,15 @@ describe("GitHub Action PR review wrapper", () => {
     expect(action).toContain("pr:");
     expect(action).toContain("github-token:");
     expect(action).toContain("working-directory: $" + "{{ github.action_path }}");
+    expect(action).toContain("uses: actions/checkout@v4");
+    expect(action).toContain("working-directory: $" + "{{ github.workspace }}");
     expect(action).toContain("npm ci");
     expect(action).toContain("npm run build");
-    expect(action).toContain("node dist/src/cli.js preflight");
-    expect(action).toContain('node dist/src/cli.js "$' + '{args[@]}"');
+    expect(action).toContain('node "$' + '{GITHUB_ACTION_PATH}/dist/src/cli.js" preflight');
+    expect(action).toContain('--config "$MAR_CONFIG"');
+    expect(action).toContain('node "$' + '{GITHUB_ACTION_PATH}/dist/src/cli.js" "$' + '{args[@]}"');
     expect(action).toContain("GH_TOKEN: $" + "{{ inputs.github-token }}");
+    expect(action).toContain("MAR_CONFIG: $" + "{{ github.action_path }}/mar.config.json");
     expect(action).toContain("PREFLIGHT: $" + "{{ inputs.preflight }}");
     expect(action).toContain("gh pr view");
     expect(action).toContain("headRefOid");

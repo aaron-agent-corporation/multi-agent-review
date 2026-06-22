@@ -172,13 +172,14 @@ jobs:
           github-token: ${{ github.token }}
 ```
 
-The target workflow intentionally passes the PR URL rather than just the number, so
-the action can run from the MAR checkout while reviewing the target repository.
-The action posts a `MAR multi-agent review` commit status to the PR head commit:
-`pending` while the review is running, then `success` or `failure` when the run
-finishes. If the run fails, it also creates or updates a sticky PR comment with
-the workflow link and operator next steps. `statuses: write` is required for the
-PR UI status, and `issues: write` is required for the failure comment.
+The target workflow intentionally passes the PR URL rather than just the number.
+The reusable action checks out the target repository, runs the MAR CLI from that
+repository workspace, and loads the MAR action's bundled roster config. The action
+posts a `MAR multi-agent review` commit status to the PR head commit: `pending`
+while the review is running, then `success` or `failure` when the run finishes. If
+the run fails, it also creates or updates a sticky PR comment with the workflow
+link and operator next steps. `statuses: write` is required for the PR UI status,
+and `issues: write` is required for the failure comment.
 
 ## The input document
 

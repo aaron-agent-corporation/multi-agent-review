@@ -41,10 +41,11 @@ function writeRoster(agents: unknown[], defaults?: unknown): string {
 
 /** Run the CLI through tsx in workdir; never reject so we can assert exit codes. */
 function runCli(args: string[], env: Record<string, string> = {}) {
+  const npmCache = join(workdir, ".npm-cache");
   return execa("npx", ["tsx", cliEntry, ...args], {
     cwd: workdir,
     reject: false,
-    env: { ...process.env, ...env },
+    env: { ...process.env, NPM_CONFIG_CACHE: npmCache, npm_config_cache: npmCache, ...env },
   });
 }
 
@@ -196,6 +197,19 @@ describe.sequential("mar preflight — status table + exit code (D-28)", () => {
     expect(existsSync(join(workdir, ".mar", "preflight.json"))).toBe(true);
   });
 
+  it("loads an explicit --config path instead of requiring mar.config.json in cwd", async () => {
+    const cfgPath = join(workdir, "external-mar.config.json");
+    writeFileSync(
+      cfgPath,
+      `${JSON.stringify({ agents: [{ name: "claude-1", vendor: "claude", bin: `node ${fakeClaude}` }] }, null, 2)}\n`,
+    );
+    const r = await runCli(["preflight", "--config", cfgPath]);
+    expect(r.exitCode).toBe(0);
+    expect(`${r.stdout}`).toMatch(/claude-1/);
+    expect(`${r.stderr}`).not.toMatch(/no roster|unknown option/);
+    expect(existsSync(join(workdir, "mar.config.json"))).toBe(false);
+  });
+
   it("any-fail roster (gemini auth-fail) exits 1 and surfaces a hint", async () => {
     writeRoster([
       { name: "claude-1", vendor: "claude", bin: `node ${fakeClaude}` },
@@ -207,5 +221,28 @@ describe.sequential("mar preflight — status table + exit code (D-28)", () => {
     const r = await runCli(["preflight"]);
     expect(r.exitCode).toBe(1);
     expect(`${r.stdout}`).toMatch(/install|responsive/);
+  });
+});
+
+describe.sequential("mar pr review — explicit config path", () => {
+  it("loads --config before fetching PR context, so target repos do not need mar.config.json", async () => {
+    const cfgPath = join(workdir, "external-mar.config.json");
+    writeFileSync(
+      cfgPath,
+      `${JSON.stringify(
+        {
+          agents: [
+            { name: "claude-1", vendor: "claude", bin: `node ${fakeClaude}` },
+            { name: "codex-1", vendor: "codex", bin: `node ${fakeCodex}` },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const r = await runCli(["pr", "review", "not-a-real-pr", "--config", cfgPath, "--autonomous"]);
+    expect(r.exitCode).toBe(1);
+    expect(`${r.stderr}`).not.toMatch(/no roster|unknown option/);
+    expect(existsSync(join(workdir, "mar.config.json"))).toBe(false);
   });
 });

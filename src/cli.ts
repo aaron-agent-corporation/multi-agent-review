@@ -56,10 +56,15 @@ interface RunOptions {
   gated?: boolean;
   autonomous?: boolean;
   pauseAndExit?: boolean;
+  config?: string;
 }
 
 interface PullRequestReviewOptions extends RunOptions {
   post?: boolean;
+}
+
+interface PreflightOptions {
+  config?: string;
 }
 
 /**
@@ -370,10 +375,10 @@ async function runInit(): Promise<number> {
  * (run-start auto-preflight is Phase 3 — D-27). The business logic lives in preflight.ts; the CLI
  * stays thin.
  */
-async function runPreflightCmd(): Promise<number> {
+async function runPreflightCmd(opts: PreflightOptions = {}): Promise<number> {
   let agents: AgentEntry[];
   try {
-    const config = await loadConfig();
+    const config = await loadConfig(opts.config);
     agents = config.agents;
   } catch (err) {
     process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -399,7 +404,7 @@ async function runRun(input: string, opts: RunOptions = {}): Promise<number> {
   // 1. Load the roster (clear missing/invalid errors → exit 2).
   let config: Awaited<ReturnType<typeof loadConfig>>;
   try {
-    config = await loadConfig();
+    config = await loadConfig(opts.config);
   } catch (err) {
     process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 2;
@@ -448,7 +453,7 @@ async function runRun(input: string, opts: RunOptions = {}): Promise<number> {
 async function runPrReview(selector: string, opts: PullRequestReviewOptions = {}): Promise<number> {
   let config: Awaited<ReturnType<typeof loadConfig>>;
   try {
-    config = await loadConfig();
+    config = await loadConfig(opts.config);
   } catch (err) {
     process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 2;
@@ -628,8 +633,9 @@ export function buildProgram(): Command {
   program
     .command("preflight")
     .description("Check each roster agent (installed/responsive) and print a status table")
-    .action(async () => {
-      process.exitCode = await runPreflightCmd();
+    .option("--config <path>", "path to mar.config.json")
+    .action(async (opts: PreflightOptions) => {
+      process.exitCode = await runPreflightCmd(opts);
     });
 
   program
@@ -646,6 +652,7 @@ export function buildProgram(): Command {
       "--pause-and-exit",
       "gated only: pause at the first boundary, exit 0, resume with `mar resume`",
     )
+    .option("--config <path>", "path to mar.config.json")
     .action(async (input: string, opts: RunOptions) => {
       process.exitCode = await runRun(input, opts);
     });
@@ -666,6 +673,7 @@ export function buildProgram(): Command {
       "--pause-and-exit",
       "gated only: pause at the first boundary, exit 0, resume with `mar resume`",
     )
+    .option("--config <path>", "path to mar.config.json")
     .action(async (selector: string, opts: PullRequestReviewOptions) => {
       process.exitCode = await runPrReview(selector, opts);
     });
