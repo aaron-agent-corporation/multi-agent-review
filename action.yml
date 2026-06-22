@@ -52,8 +52,10 @@ runs:
       run: |
         set -uo pipefail
 
+        pr_number=""
         status_sha=""
         status_context="MAR multi-agent review"
+        comment_marker="<!-- mar-review-status -->"
 
         set_mar_status() {
           local state="$1"
@@ -68,6 +70,51 @@ runs:
             >/dev/null
         }
 
+        post_failure_comment() {
+          local code="$1"
+          if [[ -z "$pr_number" ]]; then
+            return 0
+          fi
+
+          local body_file="${RUNNER_TEMP:-/tmp}/mar-failure-comment-${GITHUB_RUN_ID:-$$}.md"
+          cat > "$body_file" <<EOF
+        ${comment_marker}
+        ## MAR multi-agent review failed
+
+        The MAR workflow did not complete, so a unified PR review was not posted.
+
+        - Workflow run: ${RUN_URL}
+        - Exit code: ${code}
+        - Status context: ${status_context}
+
+        What to do next:
+        1. Open the workflow run logs.
+        2. Inspect the \`Run PR review\` step for the failing phase and agent.
+        3. Fix the reported CLI auth, roster, permission, or validation issue.
+        4. Re-run the workflow from Actions, or push a new commit to this PR.
+        EOF
+
+          local comment_id
+          comment_id="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/comments" \
+            --jq ".[] | select(.body | startswith(\"${comment_marker}\")) | .id" \
+            | tail -n 1)"
+
+          if [[ -n "$comment_id" ]]; then
+            gh api \
+              --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
+              -F "body=@${body_file}" \
+              >/dev/null
+          else
+            gh api \
+              --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/comments" \
+              -F "body=@${body_file}" \
+              >/dev/null
+          fi
+        }
+
         finish_status() {
           local code=$?
           if [[ -n "$status_sha" ]]; then
@@ -75,24 +122,27 @@ runs:
               set_mar_status success "MAR multi-agent review completed" || true
             else
               set_mar_status failure "MAR multi-agent review failed" || true
+              post_failure_comment "$code" || echo "::warning::Unable to post MAR failure comment. Add 'issues: write' to workflow permissions."
             fi
           fi
           exit "$code"
         }
 
+        pr_number="$(gh pr view "$PR_SELECTOR" --json number --jq .number)"
         status_sha="$(gh pr view "$PR_SELECTOR" --json headRefOid --jq .headRefOid)"
-        if [[ -z "$status_sha" ]]; then
-          echo "::error::Unable to resolve PR head SHA for selector: $PR_SELECTOR"
+        if [[ -z "$pr_number" || -z "$status_sha" ]]; then
+          echo "::error::Unable to resolve PR number or head SHA for selector: $PR_SELECTOR"
           exit 2
         fi
+
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        trap finish_status EXIT
 
         if ! set_mar_status pending "MAR multi-agent review in progress"; then
           echo "::error::Unable to create MAR pending status. Add 'statuses: write' to workflow permissions."
           exit 2
         fi
-        trap 'exit 130' INT
-        trap 'exit 143' TERM
-        trap finish_status EXIT
 
         set -e
 

@@ -135,6 +135,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
   statuses: write
 
@@ -175,7 +176,9 @@ The target workflow intentionally passes the PR URL rather than just the number,
 the action can run from the MAR checkout while reviewing the target repository.
 The action posts a `MAR multi-agent review` commit status to the PR head commit:
 `pending` while the review is running, then `success` or `failure` when the run
-finishes. `statuses: write` is required for that PR UI signal.
+finishes. If the run fails, it also creates or updates a sticky PR comment with
+the workflow link and operator next steps. `statuses: write` is required for the
+PR UI status, and `issues: write` is required for the failure comment.
 
 ## The input document
 

@@ -22,9 +22,16 @@ describe("GitHub Action PR review wrapper", () => {
     expect(action).toContain("PREFLIGHT: $" + "{{ inputs.preflight }}");
     expect(action).toContain("gh pr view");
     expect(action).toContain("headRefOid");
+    expect(action).toContain("number");
     expect(action).toContain("repos/$" + "{GITHUB_REPOSITORY}/statuses/$" + "{status_sha}");
+    expect(action).toContain("post_failure_comment");
+    expect(action).toContain("<!-- mar-review-status -->");
     expect(action).toContain("MAR multi-agent review");
     expect(action).toContain("MAR multi-agent review in progress");
+    expect(action).toContain("MAR multi-agent review failed");
+    expect(action).toContain("Open the workflow run logs");
+    expect(action).toContain("issues/$" + "{pr_number}/comments");
+    expect(action).toContain("issues: write");
     expect(action).toContain("statuses: write");
   });
 
@@ -36,6 +43,7 @@ describe("GitHub Action PR review wrapper", () => {
     expect(workflow).toContain("types: [opened, reopened, synchronize, ready_for_review]");
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("pr:");
+    expect(workflow).toContain("issues: write");
     expect(workflow).toContain("statuses: write");
     expect(workflow).toContain("cancel-in-progress: true");
     expect(workflow).toContain("runs-on: self-hosted");
