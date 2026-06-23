@@ -19,6 +19,8 @@ describe("GitHub Action PR review wrapper", () => {
     expect(action).toContain("npm ci");
     expect(action).toContain("npm run build");
     expect(action).toContain('node "$' + '{GITHUB_ACTION_PATH}/dist/src/cli.js" preflight');
+    expect(action).toContain("ready_vendors");
+    expect(action).toContain("continuing with surviving-agent protocol");
     expect(action).toContain('--config "$MAR_CONFIG"');
     expect(action).toContain('node "$' + '{GITHUB_ACTION_PATH}/dist/src/cli.js" "$' + '{args[@]}"');
     expect(action).toContain("GH_TOKEN: $" + "{{ inputs.github-token }}");

@@ -158,7 +158,22 @@ runs:
         esac
 
         if [[ "$PREFLIGHT" == "true" ]]; then
-          node "${GITHUB_ACTION_PATH}/dist/src/cli.js" preflight --config "$MAR_CONFIG"
+          set +e
+          preflight_output="$(node "${GITHUB_ACTION_PATH}/dist/src/cli.js" preflight --config "$MAR_CONFIG" 2>&1)"
+          preflight_code=$?
+          set -e
+          printf '%s\n' "$preflight_output"
+          if [[ "$preflight_code" -ne 0 ]]; then
+            ready_vendors="$(
+              printf '%s\n' "$preflight_output" |
+                awk '/responsive \(/ { if (!($2 in vendors)) { vendors[$2]=1; count++ } } END { print count+0 }'
+            )"
+            if [[ "$ready_vendors" =~ ^[0-9]+$ && "$ready_vendors" -ge 2 ]]; then
+              echo "::warning::MAR preflight reported ${ready_vendors} responsive vendor(s); continuing with surviving-agent protocol."
+            else
+              exit "$preflight_code"
+            fi
+          fi
         fi
 
         args=(pr review "$PR_SELECTOR" --config "$MAR_CONFIG" "--$MAR_MODE")
