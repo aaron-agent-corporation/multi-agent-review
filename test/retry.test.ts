@@ -101,6 +101,16 @@ describe("classifyClaude (D-22)", () => {
   it("transient for 'overloaded'", () => {
     expect(classifyClaude(turn({ error: "the service is overloaded" }))).toBe("transient");
   });
+  it("transient for Claude CLI 500 internal server errors", () => {
+    expect(
+      classifyClaude(
+        turn({
+          error:
+            "API Error: 500 Internal server error. This is a server-side issue, usually temporary — try again in a moment.",
+        }),
+      ),
+    ).toBe("transient");
+  });
 });
 
 describe("classifyGrok (xAI Grok Build)", () => {

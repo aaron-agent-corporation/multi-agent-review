@@ -22,7 +22,7 @@ export type Classify = (t: TurnResult) => Classification;
  * or any rate-limit / overload signal. Matched case-insensitively against `t.error`.
  */
 const COMMON_TRANSIENT =
-  /(429|resource_exhausted|rate.?limit|usage.?limit|too many requests|quota|overloaded|503|529|unparseable)/i;
+  /(429|resource_exhausted|rate.?limit|usage.?limit|too many requests|quota|overloaded|500|internal server error|server-side issue|try again in a moment|503|529|unparseable)/i;
 
 /**
  * Shared classification core. Order matters: a hang (timedOut) and an unparseable-output fluke
