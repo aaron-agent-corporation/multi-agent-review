@@ -601,6 +601,26 @@ async function runPhaseGated(
   // all-timeout failure preserves the distinct D-17 `timeout` status.
   const failedTimedOut = failed.length > 0 && failed.every((f) => f.reason === "timeout");
 
+  if (phase.participants === "integrator" && failed.length > 0) {
+    for (const f of failed) {
+      process.stdout.write(`  ⤵ dropping ${f.entry.name} (${f.entry.vendor}): ${f.reason}\n`);
+      await addDroppedAgent(input.runDir, {
+        agent: f.entry.name,
+        vendor: f.entry.vendor,
+        phase: phase.name,
+        reason: f.reason,
+        droppedAt: new Date().toISOString(),
+      });
+    }
+    const reasons = failed.map((f) => `${f.entry.name}: ${f.reason}`).join("; ");
+    return {
+      failure: {
+        reason: `phase ${phase.name} cannot continue: designated integrator failed (${reasons})`,
+        timedOut: failedTimedOut,
+      },
+    };
+  }
+
   // Partial-failure handling: drop the failed agents, but only if >=2 distinct vendors survive.
   let survivors = ok;
   if (failed.length > 0) {

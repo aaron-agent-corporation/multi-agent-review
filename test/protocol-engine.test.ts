@@ -269,6 +269,67 @@ it("D-30 skip-failed: a draft-phase failure with >=2 survivors completes on the 
   expect(shared.filter((n: string) => n.endsWith("-draft.md")).length).toBe(2);
 });
 
+it("integration validation failure reports the designated integrator, not a bogus vendor floor", async () => {
+  const staleIntegrator = join(workdir, "stale-integrator.mjs");
+  writeFileSync(
+    staleIntegrator,
+    `
+const args = process.argv.slice(2);
+const phase = /\\[phase:([a-z]+)\\]/.exec(args.join("\\n"))?.[1] ?? "draft";
+
+function artifact(kind) {
+  if (kind === "review") {
+    return \`---\\nphase: review\\nauthor: claude\\ntargets: peer-draft\\nissues:\\n  - n: 1\\n    severity: P1\\n    question: "Does the proposal handle the empty-input case?"\\n---\\n\\n# Review\\n\`;
+  }
+  if (kind === "response") {
+    return \`---\\nphase: response\\nauthor: claude\\nreviewOf: peer-review\\nresponses:\\n  - issueRef: 1\\n    verdict: accept\\n---\\n\\n# Response\\n\`;
+  }
+  if (kind === "evaluation") {
+    return \`---\\nphase: evaluation\\nround: 1\\nauthor: claude\\nproposedBase: claude\\nremainingDisagreements: []\\ncitations: []\\n---\\n\\n# Evaluation\\n\`;
+  }
+  if (kind === "integration") {
+    return \`---\\nphase: integration\\nauthor: claude\\nbase: claude\\nadditions:\\n  - source: "peer-response.md"\\n    verdict: "merged-with-change"\\n    refinement: "Old template key; schema requires additionRef/change."\\n---\\n\\n# Integrated\\n\`;
+  }
+  return \`claude:\${kind}\\n\`;
+}
+
+process.stdout.write(JSON.stringify({
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  result: artifact(phase),
+  duration_ms: 1
+}));
+`,
+    "utf8",
+  );
+  const config = baseConfig([
+    { name: "claude", vendor: "claude", bin: `node ${staleIntegrator}` },
+    { name: "codex", vendor: "codex", bin: `node ${fakeCodex}` },
+  ]);
+
+  const exit = await runProtocol(runDir, config, inputPath);
+  expect(exit).not.toBe(0);
+
+  const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
+  expect(manifest.status).toBe("failed");
+  expect(manifest.failureReason).toContain(
+    "phase integration cannot continue: designated integrator failed",
+  );
+  expect(manifest.failureReason).toContain("claude: validation-failed");
+  expect(manifest.failureReason).not.toContain("found: none");
+  expect(manifest.droppedAgents).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        agent: "claude",
+        vendor: "claude",
+        phase: "integration",
+        reason: "validation-failed",
+      }),
+    ]),
+  );
+});
+
 it("CR-01: an all-timeout phase failure -> status timeout (D-17, not generic failed) + failureReason", async () => {
   // Both agents hang past timeoutMs (a never-exiting script), so EVERY failing agent's per-turn
   // reason is the literal "timeout". The terminal mapping must preserve the distinct D-17

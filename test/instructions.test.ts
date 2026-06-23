@@ -70,6 +70,19 @@ describe("scopedWorkdir seeds each agent's vendor-native instruction file (D-37)
     });
   }
 
+  it("the integration contract uses the schema vocabulary, not response verdict vocabulary", () => {
+    const integrationSection = TEMPLATE.slice(TEMPLATE.indexOf("## INTEGRATION artifacts"));
+    expect(integrationSection).toContain("additionRef");
+    expect(integrationSection).toContain('verdict: "merged"');
+    expect(integrationSection).toContain('verdict: "merged-with-change"');
+    expect(integrationSection).toContain("change:");
+    expect(integrationSection).toContain('verdict: "dropped"');
+    expect(integrationSection).not.toContain("source:");
+    expect(integrationSection).not.toContain("verdict: accept");
+    expect(integrationSection).not.toContain("reject-with-reason");
+    expect(integrationSection).not.toContain("refinement:");
+  });
+
   it("VENDOR_FILE maps the supported vendors to their native filenames", () => {
     expect(VENDOR_FILE).toEqual({
       claude: "CLAUDE.md",

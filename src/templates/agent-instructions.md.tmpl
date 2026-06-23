@@ -130,22 +130,31 @@ citations:
 ## INTEGRATION artifacts
 
 Only the designated integrator (the base draft's author) merges. The integrator reviews
-each proposed addition BEFORE patching and may refine or reject additions that conflict
-with resolved decisions. Emit markdown whose frontmatter carries a per-addition verdict,
-followed by the merged document body:
+each proposed addition BEFORE patching and may merge, merge with a change, or drop additions
+that conflict with resolved decisions. Emit markdown whose frontmatter carries a per-addition
+verdict, followed by the merged document body:
 
 ```yaml
 ---
-phase: integration
-author: <integrator-agent-name>
-base: <the selected base document>
+phase: "integration"
+author: "<integrator-agent-name>"
+base: "<the selected base document>"
 additions:
-  - source: <the proposal/peer artifact this addition came from>
-    verdict: accept            # accept | reject-with-reason | refine
-    # reason: <required when reject-with-reason>
-    # refinement: <required when refine>
+  - additionRef: "<the proposal/peer artifact or issue id this addition came from>"
+    verdict: "merged"              # exactly one of: merged, merged-with-change, dropped
+  - additionRef: "<the proposal/peer artifact or issue id this addition came from>"
+    verdict: "merged-with-change"
+    change: "<required when merged-with-change; what you changed before merging>"
+  - additionRef: "<the proposal/peer artifact or issue id this addition came from>"
+    verdict: "dropped"
+    reason: "<required when dropped; why this addition was not merged>"
 ---
 ```
 
+- Each addition is keyed by `additionRef`.
+- `verdict` is exactly one of:
+  - `merged` — you merged the addition as proposed;
+  - `merged-with-change` — you merged it after changing it; you MUST supply a `change`;
+  - `dropped` — you did not merge it; you MUST supply a `reason`.
 The body below the frontmatter is the full merged final document. Record resolved
 decisions so later rounds do not relitigate them; list open decisions explicitly.
