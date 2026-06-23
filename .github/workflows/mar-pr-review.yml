@@ -28,7 +28,7 @@ concurrency:
 jobs:
   review:
     name: Multi-agent PR review
-    runs-on: [self-hosted, macOS, ARM64, mar]
+    runs-on: self-hosted
     if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - name: Resolve PR review mode
@@ -39,15 +39,11 @@ jobs:
           DISPATCH_POST: ${{ inputs.post }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            printf 'PR_SELECTOR=%s
-' "$PR_URL" >> "$GITHUB_ENV"
-            printf 'MAR_POST_REVIEW=true
-' >> "$GITHUB_ENV"
+            echo "PR_SELECTOR=$PR_URL" >> "$GITHUB_ENV"
+            echo "MAR_POST_REVIEW=true" >> "$GITHUB_ENV"
           else
-            printf 'PR_SELECTOR=%s
-' "$DISPATCH_PR_SELECTOR" >> "$GITHUB_ENV"
-            printf 'MAR_POST_REVIEW=%s
-' "$DISPATCH_POST" >> "$GITHUB_ENV"
+            echo "PR_SELECTOR=$DISPATCH_PR_SELECTOR" >> "$GITHUB_ENV"
+            echo "MAR_POST_REVIEW=$DISPATCH_POST" >> "$GITHUB_ENV"
           fi
 
       - name: Run MAR review
@@ -55,6 +51,4 @@ jobs:
         with:
           pr: ${{ env.PR_SELECTOR }}
           post: ${{ env.MAR_POST_REVIEW }}
-          notify-webhook-url: ${{ secrets.MAR_NOTIFY_WEBHOOK_URL }}
-          notify-webhook-token: ${{ secrets.MAR_NOTIFY_WEBHOOK_TOKEN }}
           github-token: ${{ github.token }}
