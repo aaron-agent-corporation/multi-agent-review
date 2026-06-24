@@ -60,4 +60,6 @@ jobs:
         with:
           pr: ${{ env.PR_SELECTOR }}
           post: ${{ env.MAR_POST_REVIEW }}
+          notify-webhook-url: ${{ secrets.MAR_NOTIFY_WEBHOOK_URL }}
+          notify-webhook-token: ${{ secrets.MAR_NOTIFY_WEBHOOK_TOKEN }}
           github-token: ${{ github.token }}

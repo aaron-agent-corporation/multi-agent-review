@@ -120,6 +120,40 @@ describe("makeCodexAdapter (against fake-codex fixture)", () => {
     vi.resetModules();
   });
 
+  it("sets CODEX_HOME from MAR_CODEX_HOME so OAuth auth.json is visible", async () => {
+    const execaMock = vi.fn().mockResolvedValue({
+      stdout: '{"type":"turn.completed"}',
+      stderr: "",
+      exitCode: 0,
+      durationMs: 5,
+      timedOut: false,
+      isForcefullyTerminated: false,
+    });
+    vi.doMock("execa", () => ({ execa: execaMock }));
+    vi.resetModules();
+    const { makeCodexAdapter: fresh } = await import("../src/adapters/codex.js");
+
+    const priorCodexHome = process.env.CODEX_HOME;
+    const priorMarCodexHome = process.env.MAR_CODEX_HOME;
+    process.env.CODEX_HOME = "/tmp/ambient-agent-codex-home";
+    process.env.MAR_CODEX_HOME = "/tmp/mar-codex-home";
+    try {
+      const adapter = fresh("codex");
+      await adapter.invoke(req("hello world"));
+    } finally {
+      if (priorCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = priorCodexHome;
+      if (priorMarCodexHome === undefined) delete process.env.MAR_CODEX_HOME;
+      else process.env.MAR_CODEX_HOME = priorMarCodexHome;
+    }
+
+    const [, , opts] = execaMock.mock.calls[0];
+    expect(opts.env).toMatchObject({ CODEX_HOME: "/tmp/mar-codex-home" });
+
+    vi.doUnmock("execa");
+    vi.resetModules();
+  });
+
   it("flag-pinning with model: makeCodexAdapter(bin, 'o4') adds ['-m','o4'] before the prompt", async () => {
     const execaMock = vi.fn().mockResolvedValue({
       stdout: '{"type":"turn.completed"}',

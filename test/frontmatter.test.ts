@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseAgentFrontmatter, readAgentFrontmatter } from "../src/protocol/frontmatter.js";
+import {
+  parseAgentFrontmatter,
+  parseAgentTurnFrontmatter,
+  readAgentFrontmatter,
+} from "../src/protocol/frontmatter.js";
 
 let work: string;
 
@@ -28,6 +32,15 @@ const CLEAN_AGENT = [
   "author: claude",
   "round: 1",
   "proposedBase: claude",
+].join("\n");
+
+const CLEAN_RESPONSE = [
+  "phase: response",
+  "author: gemini",
+  "reviewOf: 002-claude-review.md",
+  "responses:",
+  "  - issueRef: 1",
+  "    verdict: accept",
 ].join("\n");
 
 describe("shared tolerant frontmatter reader (Pitfall 4)", () => {
@@ -63,6 +76,55 @@ describe("shared tolerant frontmatter reader (Pitfall 4)", () => {
     const raw = wrapped(`${preamble}---\n${CLEAN_AGENT}\n---\n\n# body\n`);
     const data = parseAgentFrontmatter(raw) as Record<string, unknown>;
     expect(data.author).toBe("claude");
+  });
+
+  it("skips an accidental engine wrapper pasted before the real turn frontmatter", () => {
+    const accidentalWrapper = [
+      "---",
+      'agent: "gemini"',
+      "seq: 8",
+      'kind: "response"',
+      'runId: "r1"',
+      "phase: response",
+      "---",
+      "",
+      "---",
+      CLEAN_RESPONSE,
+      "---",
+      "",
+      "# Response by gemini",
+    ].join("\n");
+    const data = parseAgentTurnFrontmatter(accidentalWrapper) as Record<string, unknown>;
+    expect(data.author).toBe("gemini");
+    expect(data.reviewOf).toBe("002-claude-review.md");
+    expect(data.responses).toEqual([{ issueRef: 1, verdict: "accept" }]);
+  });
+
+  it("reads the inner agent fields when a written artifact contains a nested wrapper in its body", async () => {
+    const p = join(work, "nested-wrapper.md");
+    writeFileSync(
+      p,
+      wrapped(
+        [
+          "---",
+          'agent: "gemini"',
+          "seq: 8",
+          'kind: "response"',
+          'runId: "r1"',
+          "phase: response",
+          "---",
+          "",
+          "---",
+          CLEAN_RESPONSE,
+          "---",
+          "",
+          "# Response by gemini",
+        ].join("\n"),
+      ),
+    );
+    const data = (await readAgentFrontmatter(p)) as Record<string, unknown>;
+    expect(data.author).toBe("gemini");
+    expect(data.responses).toEqual([{ issueRef: 1, verdict: "accept" }]);
   });
 
   it("returns null for a missing file (non-signal semantics preserved)", async () => {

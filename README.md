@@ -112,8 +112,26 @@ forked PRs because it runs install/build scripts and local vendor CLIs on the ru
 
 ### Install in another repository
 
-Target repositories can use this repository as a reusable composite action. Add this
-workflow to the target repo as `.github/workflows/mar-pr-review.yml`:
+Target repositories can use this repository as a reusable composite action. The
+easiest path is to run the installer from the target repo:
+
+```sh
+mar pr install-workflow
+```
+
+Useful variants:
+
+```sh
+mar pr install-workflow --repo /path/to/repo
+mar pr install-workflow --runner-labels self-hosted,macOS,ARM64,mar
+mar pr install-workflow --action-ref aaron-agent-corporation/multi-agent-review@main
+mar pr install-workflow --force
+```
+
+The installer writes `.github/workflows/mar-pr-review.yml` and refuses to overwrite
+an existing workflow unless `--force` is supplied.
+
+The generated workflow is:
 
 ```yaml
 name: MAR PR Review
@@ -169,6 +187,8 @@ jobs:
         with:
           pr: ${{ env.PR_SELECTOR }}
           post: ${{ env.MAR_POST_REVIEW }}
+          notify-webhook-url: ${{ secrets.MAR_NOTIFY_WEBHOOK_URL }}
+          notify-webhook-token: ${{ secrets.MAR_NOTIFY_WEBHOOK_TOKEN }}
           github-token: ${{ github.token }}
 ```
 
@@ -180,6 +200,65 @@ while the review is running, then `success` or `failure` when the run finishes. 
 the run fails, it also creates or updates a sticky PR comment with the workflow
 link and operator next steps. `statuses: write` is required for the PR UI status,
 and `issues: write` is required for the failure comment.
+
+### PR completion notifications
+
+The reusable action can notify an external relay after a MAR review completes. The
+PR body controls only whether to notify and which logical target to name:
+
+```md
+<!-- mar-notify-v1
+kind: claude-code-channel
+target: mar-relay:abc123
+-->
+```
+
+For local coding agents, you can install a commit hook so new commits automatically
+carry the same target even if the agent never edits the PR body:
+
+```sh
+mar pr notify-hook install --target mar-relay:abc123
+```
+
+The hook writes a `MAR-Notify` trailer to future commit messages:
+
+```text
+MAR-Notify: claude-code-channel mar-relay:abc123
+```
+
+On completion, MAR reads the PR body marker first. If that marker is absent, it reads
+the PR head commit and uses the `MAR-Notify` trailer. Existing commits are not
+rewritten; after installing the hook, amend the latest commit or add the PR body
+marker manually if the PR already exists.
+
+Configure the actual relay URL and secret in trusted workflow configuration, not
+in the PR body:
+
+```yaml
+with:
+  notify-webhook-url: ${{ secrets.MAR_NOTIFY_WEBHOOK_URL }}
+  notify-webhook-token: ${{ secrets.MAR_NOTIFY_WEBHOOK_TOKEN }}
+```
+
+When the marker is present and `notify-webhook-url` is set, MAR posts a compact
+JSON payload containing the status, repository, PR URL, head SHA, run URL, status
+context, marker `kind`, and marker `target`. Missing markers or missing webhook
+configuration are clean no-ops. Webhook delivery failures are warnings and do not
+change the MAR review result.
+
+For Claude Code running locally, point `MAR_NOTIFY_WEBHOOK_URL` at a relay that
+forwards the payload into a Claude Code Channel. The channel receiver can either
+listen on localhost behind a tunnel or poll a hosted relay. During the Claude Code
+Channels research preview, a custom development channel is started with a command
+like:
+
+```sh
+claude --dangerously-load-development-channels server:mar-webhook
+```
+
+A production relay should keep an allowlist of valid targets and should accept
+events only from GitHub Actions using `MAR_NOTIFY_WEBHOOK_TOKEN`. If no channel is
+running, MAR records only a warning and the PR review result is unchanged.
 
 ## The input document
 
@@ -233,6 +312,10 @@ artifacts at every gate, relay your approve/feedback/abort decision, and deliver
 integrated document and decision-record digest at the end. The plugin is a thin
 driver — all protocol logic stays in the `mar` CLI, so the coordination layer remains
 vendor-neutral.
+
+For GitHub automation setup, `/mar-install-pr-review [repo-path]` installs the
+automatic PR review workflow into the current or specified repository and verifies
+the resulting diff.
 
 ## Development
 

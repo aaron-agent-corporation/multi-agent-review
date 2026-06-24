@@ -17,6 +17,14 @@ inputs:
     description: Run `mar preflight` before reviewing.
     required: false
     default: "true"
+  notify-webhook-url:
+    description: Trusted MAR completion relay URL. PR bodies only opt in and name a target.
+    required: false
+    default: ""
+  notify-webhook-token:
+    description: Optional bearer token for the MAR completion relay.
+    required: false
+    default: ""
   github-token:
     description: GitHub token used by gh to read and post pull request reviews.
     required: true
@@ -49,6 +57,8 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        MAR_NOTIFY_WEBHOOK_URL: ${{ inputs.notify-webhook-url }}
+        MAR_NOTIFY_WEBHOOK_TOKEN: ${{ inputs.notify-webhook-token }}
         MAR_CONFIG: ${{ github.action_path }}/mar.config.json
         MAR_MODE: ${{ inputs.mode }}
         POST_REVIEW: ${{ inputs.post }}
@@ -121,14 +131,25 @@ runs:
           fi
         }
 
+        post_completion_notification() {
+          local state="$1"
+          node "${GITHUB_ACTION_PATH}/dist/src/cli.js" pr notify "${PR_SELECTOR}" \
+            --status "${state}" \
+            --run-url "${RUN_URL}" \
+            --status-context "${status_context}" \
+            --repository "${GITHUB_REPOSITORY}"
+        }
+
         finish_status() {
           local code=$?
           if [[ -n "$status_sha" ]]; then
             if [[ "$code" -eq 0 ]]; then
               set_mar_status success "MAR multi-agent review completed" || true
+              post_completion_notification success || echo "::warning::Unable to send MAR completion notification."
             else
               set_mar_status failure "MAR multi-agent review failed" || true
               post_failure_comment "$code" || echo "::warning::Unable to post MAR failure comment. Add 'issues: write' to workflow permissions."
+              post_completion_notification failure || echo "::warning::Unable to send MAR completion notification."
             fi
           fi
           exit "$code"

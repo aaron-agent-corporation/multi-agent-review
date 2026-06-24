@@ -25,14 +25,14 @@ const Verdict = z.discriminatedUnion("verdict", [
 
 /**
  * A response-round artifact's frontmatter (REVW-02). `reviewOf` names the review artifact this
- * answers; `responses` must hold at least one verdict. Distinct from merging (the response round
- * produces a decision trail, not an integrated draft).
+ * answers; `responses` may be empty when no review artifact targeted this agent's draft. Distinct
+ * from merging (the response round produces a decision trail, not an integrated draft).
  */
 export const ResponseFrontmatter = z.object({
   phase: z.literal("response"),
   author: z.string().min(1),
   reviewOf: z.string().min(1),
-  responses: z.array(Verdict).min(1),
+  responses: z.array(Verdict),
 });
 
 export type ResponseFrontmatter = z.infer<typeof ResponseFrontmatter>;

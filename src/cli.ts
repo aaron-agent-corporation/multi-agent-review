@@ -5,6 +5,9 @@ import { Command } from "commander";
 import { makeAdapter } from "./adapters/registry.js";
 import { loadConfig, resolveAgent } from "./config.js";
 import { assertReviewable } from "./gates.js";
+import { installPrepareCommitMessageNotificationHook } from "./git/notify-hook.js";
+import { installPrReviewWorkflow } from "./github/install-workflow.js";
+import { type NotificationStatus, notifyPullRequestCompletion } from "./github/notify.js";
 import { detectVendors, writeStarterConfig } from "./init.js";
 import { logInvocation } from "./log/invocation.js";
 import { runPullRequestReview } from "./pr-review.js";
@@ -61,6 +64,29 @@ interface RunOptions {
 
 interface PullRequestReviewOptions extends RunOptions {
   post?: boolean;
+}
+
+interface PullRequestNotifyOptions {
+  status?: string;
+  runUrl?: string;
+  reviewUrl?: string;
+  statusContext?: string;
+  repository?: string;
+  webhookUrl?: string;
+  timeout?: string;
+}
+
+interface PullRequestNotifyHookInstallOptions {
+  kind?: string;
+  target?: string;
+  gitDir?: string;
+}
+
+interface PullRequestInstallWorkflowOptions {
+  repo?: string;
+  force?: boolean;
+  actionRef?: string;
+  runnerLabels?: string;
 }
 
 interface PreflightOptions {
@@ -482,6 +508,83 @@ async function runPrReview(selector: string, opts: PullRequestReviewOptions = {}
   }
 }
 
+async function runPrNotify(selector: string, opts: PullRequestNotifyOptions = {}): Promise<number> {
+  if (opts.status !== "success" && opts.status !== "failure") {
+    process.stderr.write("error: --status must be success or failure\n");
+    return 2;
+  }
+  const runUrl = opts.runUrl ?? process.env.RUN_URL;
+  if (!runUrl) {
+    process.stderr.write("error: --run-url is required when RUN_URL is not set\n");
+    return 2;
+  }
+  const timeoutMs = parseTimeout(opts.timeout);
+  if (timeoutMs === null) {
+    process.stderr.write("error: --timeout must be a positive integer (ms)\n");
+    return 2;
+  }
+
+  try {
+    const result = await notifyPullRequestCompletion(selector, {
+      status: opts.status as NotificationStatus,
+      runUrl,
+      ...(opts.reviewUrl ? { reviewUrl: opts.reviewUrl } : {}),
+      ...(opts.statusContext ? { statusContext: opts.statusContext } : {}),
+      ...(opts.repository ? { repository: opts.repository } : {}),
+      ...(opts.webhookUrl ? { webhookUrl: opts.webhookUrl } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
+    if (result.sent) {
+      process.stdout.write(`✓ sent MAR completion notification to ${result.payload.target}\n`);
+    } else {
+      process.stdout.write(`MAR completion notification skipped: ${result.reason}\n`);
+    }
+    return 0;
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
+  }
+}
+
+function runPrNotifyHookInstall(opts: PullRequestNotifyHookInstallOptions = {}): number {
+  if (!opts.target) {
+    process.stderr.write("error: --target is required\n");
+    return 2;
+  }
+  try {
+    const result = installPrepareCommitMessageNotificationHook({
+      gitDir: opts.gitDir ?? ".git",
+      kind: opts.kind ?? "claude-code-channel",
+      target: opts.target,
+    });
+    process.stdout.write(`✓ installed MAR notification commit hook at ${result.hookPath}\n`);
+    return 0;
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
+  }
+}
+
+async function runPrInstallWorkflow(opts: PullRequestInstallWorkflowOptions = {}): Promise<number> {
+  try {
+    const result = await installPrReviewWorkflow({
+      repo: opts.repo,
+      force: opts.force,
+      actionRef: opts.actionRef,
+      runnerLabels: opts.runnerLabels,
+    });
+    const verb = result.overwritten ? "updated" : "installed";
+    process.stdout.write(`✓ ${verb} MAR PR review workflow at ${result.workflowPath}\n`);
+    process.stdout.write(
+      "Next: commit this workflow, confirm a self-hosted runner is online for the repo, then open or update a non-draft same-repo PR.\n",
+    );
+    return 0;
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
+  }
+}
+
 /**
  * `mar resume <run-id>` / `mar resume --last` — continue an interrupted/failed/paused run from its
  * last completed phase (PROT-06, D-55). THIN controller (02-05 thin-CLI rule): it loads the roster,
@@ -498,6 +601,7 @@ async function runResume(opts: {
   step?: boolean;
   feedback?: string;
   abort?: boolean;
+  config?: string;
 }): Promise<number> {
   // 0. Non-interactive gate-decision flags (D-50/D-51 relay surface for drivers like the Claude
   //    Code plugin): `--abort` ends the paused run and runs nothing, so it cannot be combined with
@@ -514,7 +618,7 @@ async function runResume(opts: {
   // 1. Load the roster (clear missing/invalid errors → exit 2).
   let config: Awaited<ReturnType<typeof loadConfig>>;
   try {
-    config = await loadConfig();
+    config = await loadConfig(opts.config);
   } catch (err) {
     process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 2;
@@ -678,6 +782,52 @@ export function buildProgram(): Command {
       process.exitCode = await runPrReview(selector, opts);
     });
 
+  pr.command("notify")
+    .description("Send a completion notification for an opted-in pull request")
+    .argument("<pr>", "pull request number, URL, or gh selector")
+    .requiredOption("--status <success|failure>", "MAR review terminal status")
+    .option("--run-url <url>", "GitHub Actions run URL (defaults to RUN_URL)")
+    .option("--review-url <url>", "URL where the posted MAR review can be read")
+    .option("--status-context <name>", "GitHub status context name")
+    .option("--repository <owner/repo>", "repository name (defaults to GITHUB_REPOSITORY)")
+    .option("--webhook-url <url>", "notification relay URL (defaults to MAR_NOTIFY_WEBHOOK_URL)")
+    .option("--timeout <ms>", "notification HTTP timeout in milliseconds")
+    .action(async (selector: string, opts: PullRequestNotifyOptions) => {
+      process.exitCode = await runPrNotify(selector, opts);
+    });
+
+  const notifyHook = pr
+    .command("notify-hook")
+    .description("Install local hooks that add MAR notification metadata to commits");
+
+  notifyHook
+    .command("install")
+    .description("Install a prepare-commit-msg hook that appends a MAR-Notify trailer")
+    .option("--kind <kind>", "notification marker kind", "claude-code-channel")
+    .requiredOption("--target <target>", "logical notification target, e.g. mar-relay:abc123")
+    .option("--git-dir <path>", "path to the repository .git directory", ".git")
+    .action((opts: PullRequestNotifyHookInstallOptions) => {
+      process.exitCode = runPrNotifyHookInstall(opts);
+    });
+
+  pr.command("install-workflow")
+    .description("Install the reusable MAR automatic PR review workflow into a target repository")
+    .option("--repo <path>", "target repository path", ".")
+    .option("--force", "overwrite an existing .github/workflows/mar-pr-review.yml")
+    .option(
+      "--action-ref <ref>",
+      "reusable action ref",
+      "aaron-agent-corporation/multi-agent-review@main",
+    )
+    .option(
+      "--runner-labels <labels>",
+      "comma-separated runs-on labels for the self-hosted runner",
+      "self-hosted",
+    )
+    .action(async (opts: PullRequestInstallWorkflowOptions) => {
+      process.exitCode = await runPrInstallWorkflow(opts);
+    });
+
   program
     .command("resume")
     .description("Resume an interrupted/failed/paused run from its last completed phase")
@@ -692,10 +842,17 @@ export function buildProgram(): Command {
       "--abort",
       "end a gate-paused run without running anything (cannot combine with --step/--feedback)",
     )
+    .option("--config <path>", "path to mar.config.json")
     .action(
       async (
         runId: string | undefined,
-        opts: { last?: boolean; step?: boolean; feedback?: string; abort?: boolean },
+        opts: {
+          last?: boolean;
+          step?: boolean;
+          feedback?: string;
+          abort?: boolean;
+          config?: string;
+        },
       ) => {
         process.exitCode = await runResume({
           runId,
@@ -703,6 +860,7 @@ export function buildProgram(): Command {
           step: opts.step,
           feedback: opts.feedback,
           abort: opts.abort,
+          config: opts.config,
         });
       },
     );

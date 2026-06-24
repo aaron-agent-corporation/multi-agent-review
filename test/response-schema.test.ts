@@ -56,14 +56,24 @@ describe("ResponseFrontmatter schema (REVW-02, discriminated on verdict)", () =>
     expect(r.success).toBe(false);
   });
 
-  it("rejects an empty responses array (min 1)", () => {
-    expect(ResponseFrontmatter.safeParse({ ...base, responses: [] }).success).toBe(false);
+  it("parses an empty responses array for an agent with no targeted review", () => {
+    expect(
+      ResponseFrontmatter.safeParse({ ...base, reviewOf: "none", responses: [] }).success,
+    ).toBe(true);
   });
 
   it("rejects a non-positive issueRef", () => {
     const r = ResponseFrontmatter.safeParse({
       ...base,
       responses: [{ verdict: "accept", issueRef: 0 }],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a composite string issueRef", () => {
+    const r = ResponseFrontmatter.safeParse({
+      ...base,
+      responses: [{ verdict: "accept", issueRef: "codex-1#1" }],
     });
     expect(r.success).toBe(false);
   });

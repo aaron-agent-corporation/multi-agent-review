@@ -45,6 +45,23 @@ function writeRoster(dir: string, defaults?: Record<string, unknown>): void {
   );
 }
 
+function writeRosterFile(path: string, defaults?: Record<string, unknown>): void {
+  writeFileSync(
+    path,
+    `${JSON.stringify(
+      {
+        agents: [
+          { name: "claude", vendor: "claude", bin: `node ${fakeClaude}` },
+          { name: "codex", vendor: "codex", bin: `node ${fakeCodex}` },
+        ],
+        ...(defaults ? { defaults } : {}),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
 function writeInput(dir: string): string {
   const inputPath = join(dir, "input.md");
   writeFileSync(inputPath, "# doc under review\n\nA proposal to evaluate.\n", "utf8");
@@ -120,6 +137,29 @@ it("--step runs exactly one phase then pauses again; repeated --step walks the r
     expect(kinds.filter((k: string) => k === phase).length).toBe(expected);
   }
   expect(existsSync(join(runDir, "decision-record.md"))).toBe(true);
+});
+
+it("--config lets resume continue a run launched with a non-default roster path", async () => {
+  const configPath = join(workdir, "custom.mar.config.json");
+  writeRosterFile(configPath);
+  const inputPath = writeInput(workdir);
+
+  const paused = await mar(workdir, [
+    "run",
+    inputPath,
+    "--config",
+    configPath,
+    "--gated",
+    "--pause-and-exit",
+  ]);
+  expect(paused.exitCode).toBe(0);
+  const runDir = singleRunDir(workdir);
+  expect(readManifest(runDir).status).toBe("paused-awaiting-approval");
+
+  const stepped = await mar(workdir, ["resume", "--last", "--step", "--config", configPath]);
+  expect(stepped.exitCode).toBe(0);
+  const kinds = readManifest(runDir).artifacts.map((a: { kind: string }) => a.kind);
+  expect(kinds.filter((k: string) => k === "review")).toHaveLength(2);
 });
 
 it("--feedback persists the D-51 note to gate-feedback/ and injects it into the resumed phase's prompt", async () => {

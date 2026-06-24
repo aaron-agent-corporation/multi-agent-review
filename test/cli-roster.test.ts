@@ -246,3 +246,24 @@ describe.sequential("mar pr review — explicit config path", () => {
     expect(existsSync(join(workdir, "mar.config.json"))).toBe(false);
   });
 });
+
+describe.sequential("mar pr notify-hook install", () => {
+  it("installs the local prepare-commit-msg hook with the requested target", async () => {
+    const gitDir = join(workdir, ".git");
+    const r = await runCli([
+      "pr",
+      "notify-hook",
+      "install",
+      "--git-dir",
+      gitDir,
+      "--target",
+      "mar-relay:abc123",
+    ]);
+
+    expect(r.exitCode).toBe(0);
+    expect(`${r.stdout}`).toContain("prepare-commit-msg");
+    expect(readFileSync(join(gitDir, "hooks", "prepare-commit-msg"), "utf8")).toContain(
+      "mar-relay:abc123",
+    );
+  });
+});

@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { execa } from "execa";
 import { CodexEvent, type TurnResult } from "../schema/turn.js";
 import type { AgentAdapter, TurnRequest } from "./adapter.js";
@@ -51,6 +52,10 @@ export function makeCodexAdapter(bin = "codex", model?: string): AgentAdapter {
         forceKillAfterDelay: 5000, // SIGKILL escalation if it won't die
         reject: false, // resolve (don't throw) on non-zero exit → inspect uniformly
         cleanup: true, // kill child if our process exits
+        // Codex CLI auth is stored under CODEX_HOME. Agent runtimes may set CODEX_HOME to their own
+        // sandbox home, while `codex login` writes the user's normal ~/.codex/auth.json. Use that
+        // standard store by default; MAR_CODEX_HOME is the explicit escape hatch for custom rosters.
+        env: { CODEX_HOME: process.env.MAR_CODEX_HOME ?? `${homedir()}/.codex` },
         // CRITICAL (02-05 live fix): close stdin. The prompt is passed as an argv positional, NEVER
         // via stdin — but `codex exec` BLOCKS on an open stdin pipe (execa's default), hanging every
         // invocation until the wall-clock timeout. `stdin:"ignore"` (no pipe) makes codex see EOF

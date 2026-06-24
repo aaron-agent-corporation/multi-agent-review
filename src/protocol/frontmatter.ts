@@ -22,19 +22,51 @@ import matter from "gray-matter";
  * READ-only (T-04-07) — no `matter.stringify`; gray-matter's default js-yaml SAFE load is preserved.
  */
 
+const AGENT_KEYS = new Set([
+  "author",
+  "target",
+  "issues",
+  "reviewOf",
+  "responses",
+  "round",
+  "proposedBase",
+  "remainingDisagreements",
+  "citations",
+  "base",
+  "additions",
+]);
+
+function hasKeys(data: unknown): data is Record<string, unknown> {
+  return typeof data === "object" && data !== null && Object.keys(data).length > 0;
+}
+
+function isEngineMetadataWrapper(data: unknown): boolean {
+  if (!hasKeys(data)) return false;
+  const keys = new Set(Object.keys(data));
+  const hasAgentContractKey = [...AGENT_KEYS].some((key) => keys.has(key));
+  if (hasAgentContractKey) return false;
+  return keys.has("agent") && keys.has("seq") && keys.has("kind");
+}
+
 /**
- * The tolerant fallback over a single gray-matter parse: if the direct `matter(text).data` has keys
- * use it; otherwise match the first `^---$` delimiter line (preamble prose precedes it) and parse
- * from there. Mirrors engine.ts:198-206 exactly — the variant hardened in the 04-05 live checkpoint.
+ * Tolerantly parse an AGENT-authored frontmatter block out of raw turn text. Models sometimes emit
+ * prose before the block, or paste an engine/audit wrapper before the real response when repairing a
+ * validation error. Leniency applies only to WHERE the block is found; callers still validate shape.
  */
-function tolerantData(text: string): unknown {
-  const direct = matter(text).data;
-  if (direct && Object.keys(direct).length > 0) return direct;
-  const delim = text.match(/^---\s*$/m);
-  if (delim?.index !== undefined && delim.index > 0) {
-    return matter(text.slice(delim.index)).data;
+export function parseAgentTurnFrontmatter(text: string): unknown {
+  const trimmed = text.trimStart();
+  const parsed = matter(trimmed);
+  if (hasKeys(parsed.data)) {
+    if (!isEngineMetadataWrapper(parsed.data)) return parsed.data;
+    return parseAgentTurnFrontmatter(parsed.content);
   }
-  return direct;
+
+  const delim = trimmed.match(/^---\s*$/m);
+  if (delim?.index !== undefined && delim.index > 0) {
+    return parseAgentTurnFrontmatter(trimmed.slice(delim.index));
+  }
+
+  return parsed.data;
 }
 
 /**
@@ -46,7 +78,10 @@ function tolerantData(text: string): unknown {
  */
 export function parseAgentFrontmatter(raw: string): unknown {
   const outer = matter(raw);
-  return tolerantData(outer.content.trimStart());
+  if (isEngineMetadataWrapper(outer.data)) {
+    return parseAgentTurnFrontmatter(outer.content);
+  }
+  return parseAgentTurnFrontmatter(raw);
 }
 
 /**

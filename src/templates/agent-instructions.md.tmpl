@@ -85,7 +85,7 @@ phase: response
 author: <your-agent-name>
 reviewOf: <the review artifact / reviewer you are answering>
 responses:
-  - issueRef: 1            # the issue `n` from the review you are answering
+  - issueRef: 1            # YAML number only: the issue `n` from the review you are answering
     verdict: accept        # exactly one of: accept, reject-with-reason, refine
   - issueRef: 2
     verdict: reject-with-reason
@@ -97,10 +97,26 @@ responses:
 ```
 
 - Each response is keyed by `issueRef` (the issue number it answers).
+- `issueRef` MUST be a number like `1`, not a string like `"codex-1#1"` or
+  `"002-review.md#1"`. If you answer issues from multiple review artifacts,
+  keep each `issueRef` numeric and put the artifact/reviewer names in `reviewOf`.
 - `verdict` is exactly one of:
   - `accept` — you accept the issue and will make the change;
   - `reject-with-reason` — you reject it; you MUST supply a `reason`;
   - `refine` — you accept partially / reshape it; you MUST supply a `refinement`.
+- Do not emit engine/audit wrapper keys such as `agent`, `seq`, `kind`,
+  `timestamp`, or `runId`; emit only the response artifact frontmatter above.
+- If no review artifact targets your draft, emit a valid no-op response:
+
+```yaml
+---
+phase: response
+author: <your-agent-name>
+reviewOf: none
+responses: []
+---
+```
+
 - Make concrete design decisions for accepted issues. Separate "answer the
   critique" from "rewrite the document."
 

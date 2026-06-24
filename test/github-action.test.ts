@@ -12,6 +12,8 @@ describe("GitHub Action PR review wrapper", () => {
 
     expect(action).toContain("using: composite");
     expect(action).toContain("pr:");
+    expect(action).toContain("notify-webhook-url:");
+    expect(action).toContain("notify-webhook-token:");
     expect(action).toContain("github-token:");
     expect(action).toContain("working-directory: $" + "{{ github.action_path }}");
     expect(action).toContain("uses: actions/checkout@v4");
@@ -24,6 +26,8 @@ describe("GitHub Action PR review wrapper", () => {
     expect(action).toContain('--config "$MAR_CONFIG"');
     expect(action).toContain('node "$' + '{GITHUB_ACTION_PATH}/dist/src/cli.js" "$' + '{args[@]}"');
     expect(action).toContain("GH_TOKEN: $" + "{{ inputs.github-token }}");
+    expect(action).toContain("MAR_NOTIFY_WEBHOOK_URL: $" + "{{ inputs.notify-webhook-url }}");
+    expect(action).toContain("MAR_NOTIFY_WEBHOOK_TOKEN: $" + "{{ inputs.notify-webhook-token }}");
     expect(action).toContain("MAR_CONFIG: $" + "{{ github.action_path }}/mar.config.json");
     expect(action).toContain("PREFLIGHT: $" + "{{ inputs.preflight }}");
     expect(action).toContain("gh pr view");
@@ -31,6 +35,9 @@ describe("GitHub Action PR review wrapper", () => {
     expect(action).toContain("number");
     expect(action).toContain("repos/$" + "{GITHUB_REPOSITORY}/statuses/$" + "{status_sha}");
     expect(action).toContain("post_failure_comment");
+    expect(action).toContain("post_completion_notification");
+    expect(action).toContain('pr notify "$' + '{PR_SELECTOR}"');
+    expect(action).toContain('--status "$' + '{state}"');
     expect(action).toContain("<!-- mar-review-status -->");
     expect(action).toContain("MAR multi-agent review");
     expect(action).toContain("MAR multi-agent review in progress");
@@ -62,6 +69,10 @@ describe("GitHub Action PR review wrapper", () => {
     expect(workflow).toContain("uses: ./");
     expect(workflow).toContain("pr: $" + "{{ env.PR_SELECTOR }}");
     expect(workflow).toContain("post: $" + "{{ env.MAR_POST_REVIEW }}");
+    expect(workflow).toContain("notify-webhook-url: $" + "{{ secrets.MAR_NOTIFY_WEBHOOK_URL }}");
+    expect(workflow).toContain(
+      "notify-webhook-token: $" + "{{ secrets.MAR_NOTIFY_WEBHOOK_TOKEN }}",
+    );
     expect(workflow).toContain("github-token: $" + "{{ github.token }}");
   });
 });

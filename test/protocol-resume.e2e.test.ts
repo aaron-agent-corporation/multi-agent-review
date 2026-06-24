@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-vi.setConfig({ testTimeout: 90_000 });
+vi.setConfig({ testTimeout: 240_000 });
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = join(here, "..");

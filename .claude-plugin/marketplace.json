@@ -5,7 +5,7 @@
     {
       "name": "mar",
       "source": "./plugins/mar",
-      "description": "Drive adversarial multi-vendor document reviews (mar) from Claude Code — launch gated runs, mediate phase gates, deliver the integrated result"
+      "description": "Drive adversarial multi-vendor reviews from Claude Code and install automatic MAR PR review workflows"
     }
   ]
 }

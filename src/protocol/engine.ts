@@ -1,7 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import matter from "gray-matter";
 import { assign, createActor, fromPromise, setup, toPromise } from "xstate";
 import { makeAdapter } from "../adapters/registry.js";
 import { applySkipFailed } from "../gates.js";
@@ -28,7 +27,7 @@ import { addArtifact, addDroppedAgent, readManifest, setStatus } from "../worksp
 import { promoteDrafts, scopedWorkdir } from "../workspace/scope.js";
 import { type ConvergenceResult, runConvergence } from "./converge.js";
 import { writeDecisionRecord } from "./decision-record.js";
-import { readAgentFrontmatter } from "./frontmatter.js";
+import { parseAgentTurnFrontmatter, readAgentFrontmatter } from "./frontmatter.js";
 import { expectedParticipantCount, requiredArtifactsExist } from "./gate.js";
 import {
   arbitrationLedgerEntry,
@@ -277,27 +276,15 @@ export async function runPhase(
       // attacker-influenceable content (T-04-06). The raw turn JSON + wrapped .md are still on disk.
       const validatePhase = phase.validate;
       if (validatePhase) {
-        // Tolerant reader (live-run hardening, 04-05 checkpoint): models — claude especially —
-        // sometimes emit preamble prose before the artifact despite the contract's output-channel
-        // rule. gray-matter only recognizes frontmatter at position 0, so when the direct parse
-        // yields no data we fall back to the FIRST `---` delimiter line and parse from there.
         // Schema validation stays strict (fail-closed, D-38) — leniency applies only to WHERE the
-        // frontmatter is found, never to its shape.
-        const parseFront = (text: string): unknown => {
-          const direct = matter(text).data;
-          if (direct && Object.keys(direct).length > 0) return direct;
-          const delim = text.match(/^---\s*$/m);
-          if (delim?.index !== undefined && delim.index > 0) {
-            return matter(text.slice(delim.index)).data;
-          }
-          return direct;
-        };
+        // frontmatter is found, never to its shape. The shared reader also skips an accidental
+        // engine/audit wrapper when a model pastes one ahead of its real phase frontmatter.
         // YAML parse exceptions (e.g. an unquoted colon inside a string value) must feed the SAME
         // one-retry path as schema misses — previously they threw past the gate and the turn died
         // with no feedback (observed live: gemini-1, run 20260605-MYPrO2).
         const safeValidate = (text: string): { ok: true } | { ok: false; errors: string } => {
           try {
-            return validatePhase(parseFront(text));
+            return validatePhase(parseAgentTurnFrontmatter(text));
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             return {
