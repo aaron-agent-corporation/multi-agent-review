@@ -358,3 +358,32 @@ it("CR-01: an all-timeout phase failure -> status timeout (D-17, not generic fai
   expect(manifest.artifacts.length).toBe(0);
   expect(existsSync(join(runDir, "shared"))).toBe(false);
 });
+
+it("honors per-agent timeoutMs while preserving the surviving multi-vendor roster", async () => {
+  const hangScript = join(workdir, "slow-grok.mjs");
+  writeFileSync(hangScript, "setInterval(() => {}, 1e9);\n", "utf8");
+  const config = {
+    agents: [
+      { name: "claude", vendor: "claude", bin: `node ${fakeClaude}` },
+      { name: "codex", vendor: "codex", bin: `node ${fakeCodex}` },
+      { name: "grok-build", vendor: "grok", bin: `node ${hangScript}`, timeoutMs: 200 },
+    ],
+    defaults: { timeoutMs: 30_000, retries: 0, convergenceCap: 10 },
+  } as MarConfig;
+
+  const exit = await runProtocol(runDir, config, inputPath);
+  expect(exit).toBe(0);
+
+  const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
+  expect(manifest.status).toBe("completed");
+  expect(manifest.droppedAgents).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        agent: "grok-build",
+        vendor: "grok",
+        phase: "draft",
+        reason: "timeout",
+      }),
+    ]),
+  );
+});

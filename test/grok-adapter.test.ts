@@ -89,6 +89,8 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
       "--no-memory",
       "--no-subagents",
       "--disable-web-search",
+      "--max-turns",
+      "1",
     ]);
     expect(argv).not.toContain("--always-approve");
     expect(opts.reject).toBe(false);
@@ -126,6 +128,8 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
       "--no-memory",
       "--no-subagents",
       "--disable-web-search",
+      "--max-turns",
+      "1",
       "-m",
       "grok-build",
     ]);

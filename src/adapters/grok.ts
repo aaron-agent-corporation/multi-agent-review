@@ -10,6 +10,7 @@ import { redactArgvAt, safeJsonParse, splitBin } from "./common.js";
  *   --no-auto-update        -> skip background update checks in scripts/CI
  *   --permission-mode dontAsk -> deny tool execution instead of prompting in CI
  *   --no-memory / --no-subagents / --disable-web-search -> keep review probes self-contained
+ *   --max-turns 1           -> keep headless review calls from looping on discovered tools/MCP
  *   -m <model>              -> optional model selector, e.g. grok-build
  * We deliberately omit --always-approve: review turns should not auto-approve tool execution.
  */
@@ -25,6 +26,8 @@ function buildArgv(promptText: string, model?: string): string[] {
     "--no-memory",
     "--no-subagents",
     "--disable-web-search",
+    "--max-turns",
+    "1",
   ];
   if (model) a.push("-m", model);
   return a;

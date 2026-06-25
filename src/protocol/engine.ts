@@ -135,7 +135,7 @@ export async function runPhase(
   feedback?: string,
 ): Promise<PhaseResult> {
   const { runDir, config, inputPath } = input;
-  const timeoutMs = config.defaults.timeoutMs;
+  const defaultTimeoutMs = config.defaults.timeoutMs;
   const retries = config.defaults.retries;
 
   // Decide each agent's seq ONCE, up front, from the manifest + on-disk names via nextSeq (the
@@ -210,6 +210,7 @@ export async function runPhase(
       // One transport-retried turn for `promptText`, written to an artifact. Returns the written
       // artifact (ok) or a failure reason. The transport retry (withRetry / D-23) is DISTINCT from
       // the validation retry below (D-38, Pitfall 5): this wraps only the spawn/transport layer.
+      const timeoutMs = entry.timeoutMs ?? defaultTimeoutMs;
       const runTurn = async (
         promptText: string,
       ): Promise<

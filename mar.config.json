@@ -15,11 +15,12 @@
     {
       "vendor": "grok",
       "name": "grok-build-1",
-      "model": "grok-build"
+      "model": "grok-build",
+      "timeoutMs": 120000
     }
   ],
   "defaults": {
     "timeoutMs": 600000,
-    "retries": 2
+    "retries": 1
   }
 }
