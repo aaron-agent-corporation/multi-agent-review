@@ -4,6 +4,8 @@ import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { makeAdapter } from "./adapters/registry.js";
 import { loadConfig, resolveAgent } from "./config.js";
+import { ensureMarEnv, loadMarEnv, redactedEnvReport } from "./env/mar-env.js";
+import { assertTerminalModeSupported, type TerminalMode } from "./execution/tmux.js";
 import { assertReviewable } from "./gates.js";
 import { installPrepareCommitMessageNotificationHook } from "./git/notify-hook.js";
 import { installPrReviewWorkflow } from "./github/install-workflow.js";
@@ -12,9 +14,10 @@ import { detectVendors, writeStarterConfig } from "./init.js";
 import { logInvocation } from "./log/invocation.js";
 import { runPullRequestReview } from "./pr-review.js";
 import { formatStatusLines, probeVersion, runPreflight } from "./preflight.js";
-import type { Ask, GatingOptions } from "./protocol/engine.js";
+import type { Ask, GatingOptions, ProtocolExecution } from "./protocol/engine.js";
 import { resumeProtocol, runProtocol } from "./protocol/engine.js";
 import { defaultAsk } from "./protocol/gating.js";
+import { detectGitRepo, type GitRepoInfo } from "./repo/git.js";
 import {
   type Classify,
   classifyClaude,
@@ -24,6 +27,7 @@ import {
   withRetry,
 } from "./retry.js";
 import type { AgentEntry } from "./schema/config.js";
+import type { ExecutionMetadata } from "./schema/manifest.js";
 import { RESUMABLE_STATUSES, TERMINAL_DONE } from "./schema/manifest.js";
 import { writeArtifact } from "./workspace/artifacts.js";
 import { artifactPath, newRunId, nextSeq, runDir as runDirFor } from "./workspace/layout.js";
@@ -60,6 +64,8 @@ interface RunOptions {
   autonomous?: boolean;
   pauseAndExit?: boolean;
   config?: string;
+  terminalMode?: string;
+  tmux?: boolean;
 }
 
 interface PullRequestReviewOptions extends RunOptions {
@@ -91,6 +97,10 @@ interface PullRequestInstallWorkflowOptions {
 
 interface PreflightOptions {
   config?: string;
+}
+
+interface AuthInitOptions {
+  repo?: string;
 }
 
 /**
@@ -129,6 +139,60 @@ async function resolveGating(
   const pauseAndExit = mode === "gated" && opts.pauseAndExit === true;
   // The ask() seam is threaded into gating ONLY for gated mode (autonomous never prompts).
   return mode === "gated" ? { mode, pauseAndExit, ask: askImpl } : { mode, pauseAndExit: false };
+}
+
+function resolveTerminalMode(
+  opts: RunOptions,
+  configMode: TerminalMode | undefined,
+): TerminalMode | undefined {
+  if (opts.tmux) return "tmux";
+  if (opts.terminalMode === undefined) return configMode;
+  if (opts.terminalMode === "headless" || opts.terminalMode === "tmux") return opts.terminalMode;
+  throw new Error(`terminal mode must be headless or tmux, got: ${opts.terminalMode}`);
+}
+
+async function loadExecutionEnv(cwd = process.cwd()): Promise<{
+  repo?: GitRepoInfo;
+  env: Record<string, string>;
+  envRoot: string;
+}> {
+  const repo = await detectGitRepo(cwd);
+  const envRoot = repo?.root ?? cwd;
+  return { repo, env: await loadMarEnv(envRoot), envRoot };
+}
+
+async function buildExecutionContext(opts: {
+  runId: string;
+  repo?: GitRepoInfo;
+  env: Record<string, string>;
+  terminalMode: TerminalMode | undefined;
+}): Promise<{
+  manifestExecution: ExecutionMetadata;
+  protocolExecution: ProtocolExecution;
+}> {
+  const terminalMode = opts.terminalMode ?? "headless";
+  const tmux = await assertTerminalModeSupported(terminalMode, opts.runId);
+  return {
+    manifestExecution: {
+      repoAware: opts.repo !== undefined,
+      ...(opts.repo ? { sourceRepoRoot: opts.repo.root, sourceCommit: opts.repo.commit } : {}),
+      terminalMode,
+      ...tmux,
+      worktrees: [],
+    },
+    protocolExecution: {
+      env: opts.env,
+      terminalMode,
+      ...(opts.repo
+        ? {
+            repoAware: {
+              sourceRepoRoot: opts.repo.root,
+              sourceCommit: opts.repo.commit,
+            },
+          }
+        : {}),
+    },
+  };
 }
 
 interface InvokeOptions {
@@ -395,6 +459,28 @@ async function runInit(): Promise<number> {
   return 0;
 }
 
+async function runAuthInit(opts: AuthInitOptions = {}): Promise<number> {
+  try {
+    const repo = opts.repo ? undefined : await detectGitRepo();
+    const root = opts.repo ?? repo?.root ?? process.cwd();
+    const result = await ensureMarEnv(root);
+    const loaded = await loadMarEnv(root);
+    process.stdout.write(`✓ MAR env ready at ${result.envPath}\n`);
+    process.stdout.write(`✓ example env at ${result.examplePath}\n`);
+    if (result.updatedGitignore) {
+      process.stdout.write(`✓ added .mar/MAR.env to ${result.gitignorePath}\n`);
+    }
+    const keys = redactedEnvReport(loaded);
+    if (keys.length > 0) {
+      process.stdout.write(`loaded keys: ${keys.join(", ")}\n`);
+    }
+    return 0;
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
+  }
+}
+
 /**
  * `mar preflight` — load the roster, run the tiered check, print the status table, and map
  * allPass → exit 0 / any-fail → exit 1 (D-28). `mar preflight` is the EXPLICIT preflight trigger
@@ -403,14 +489,16 @@ async function runInit(): Promise<number> {
  */
 async function runPreflightCmd(opts: PreflightOptions = {}): Promise<number> {
   let agents: AgentEntry[];
+  let env: Record<string, string>;
   try {
     const config = await loadConfig(opts.config);
     agents = config.agents;
+    env = (await loadExecutionEnv()).env;
   } catch (err) {
     process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 2;
   }
-  const { results, allPass } = await runPreflight(agents);
+  const { results, allPass } = await runPreflight(agents, { env });
   for (const line of formatStatusLines(results)) {
     process.stdout.write(`${line}\n`);
   }
@@ -467,13 +555,42 @@ async function runRun(input: string, opts: RunOptions = {}): Promise<number> {
   //    config default — a non-TTY run NEVER prompts (Pitfall 5). The resolved mode carries the ask()
   //    seam for the engine's phase-boundary gate prompts.
   const gating = await resolveGating(opts, config.defaults.mode);
+  const terminalMode = resolveTerminalMode(opts, config.defaults.terminalMode);
+  let repo: GitRepoInfo | undefined;
+  let env: Record<string, string>;
+  try {
+    const loaded = await loadExecutionEnv();
+    repo = loaded.repo;
+    env = loaded.env;
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
 
   // 5. Create the run (status "running"), then delegate the entire protocol to the engine.
   const runId = newRunId();
   const runDir = runDirFor(runId);
+  let execution: Awaited<ReturnType<typeof buildExecutionContext>>;
+  try {
+    execution = await buildExecutionContext({ runId, repo, env, terminalMode });
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
   // Record the input path so `mar resume` can re-derive the machine input from disk (D-54).
-  await createRun({ runDir, runId, status: "running", inputPath: input });
-  return await runProtocol(runDir, config, input, gating);
+  await createRun({
+    runDir,
+    runId,
+    status: "running",
+    inputPath: input,
+    execution: execution.manifestExecution,
+  });
+  if (repo) {
+    process.stdout.write(
+      `repo-aware review enabled at ${repo.root} (${repo.commit.slice(0, 12)})\n`,
+    );
+  }
+  return await runProtocol(runDir, config, input, gating, execution.protocolExecution);
 }
 
 async function runPrReview(selector: string, opts: PullRequestReviewOptions = {}): Promise<number> {
@@ -493,15 +610,25 @@ async function runPrReview(selector: string, opts: PullRequestReviewOptions = {}
   }
 
   let gating: GatingOptions;
+  let terminalMode: TerminalMode | undefined;
+  let env: Record<string, string>;
   try {
     gating = await resolveGating(opts, config.defaults.mode);
+    terminalMode = resolveTerminalMode(opts, config.defaults.terminalMode);
+    env = (await loadExecutionEnv()).env;
   } catch (err) {
     process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 2;
   }
 
   try {
-    return await runPullRequestReview(selector, { config, gating, post: opts.post === true });
+    return await runPullRequestReview(selector, {
+      config,
+      gating,
+      post: opts.post === true,
+      env,
+      terminalMode,
+    });
   } catch (err) {
     process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 1;
@@ -703,7 +830,29 @@ async function runResume(opts: {
   const gating: GatingOptions | undefined = opts.step
     ? { mode: "gated", pauseAndExit: true }
     : undefined;
-  return await resumeProtocol(runDir, config, gating, opts.feedback?.trim());
+  let execution: ProtocolExecution | undefined;
+  try {
+    const envRoot = manifest.execution?.sourceRepoRoot ?? process.cwd();
+    const env = await loadMarEnv(envRoot);
+    execution = {
+      env,
+      terminalMode: manifest.execution?.terminalMode ?? "headless",
+      ...(manifest.execution?.repoAware &&
+      manifest.execution.sourceRepoRoot &&
+      manifest.execution.sourceCommit
+        ? {
+            repoAware: {
+              sourceRepoRoot: manifest.execution.sourceRepoRoot,
+              sourceCommit: manifest.execution.sourceCommit,
+            },
+          }
+        : {}),
+    };
+  } catch (err) {
+    process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+  return await resumeProtocol(runDir, config, gating, opts.feedback?.trim(), execution);
 }
 
 export function buildProgram(): Command {
@@ -734,6 +883,16 @@ export function buildProgram(): Command {
       process.exitCode = await runInit();
     });
 
+  const auth = program.command("auth").description("MAR authentication helpers");
+
+  auth
+    .command("init")
+    .description("Create repo-local .mar/MAR.env and .mar/MAR.env.example files")
+    .option("--repo <path>", "repository path (defaults to detected git root or cwd)")
+    .action(async (opts: AuthInitOptions) => {
+      process.exitCode = await runAuthInit(opts);
+    });
+
   program
     .command("preflight")
     .description("Check each roster agent (installed/responsive) and print a status table")
@@ -757,6 +916,8 @@ export function buildProgram(): Command {
       "gated only: pause at the first boundary, exit 0, resume with `mar resume`",
     )
     .option("--config <path>", "path to mar.config.json")
+    .option("--terminal-mode <headless|tmux>", "review execution backend")
+    .option("--tmux", "run reviewers through the tmux execution backend")
     .action(async (input: string, opts: RunOptions) => {
       process.exitCode = await runRun(input, opts);
     });
@@ -778,6 +939,8 @@ export function buildProgram(): Command {
       "gated only: pause at the first boundary, exit 0, resume with `mar resume`",
     )
     .option("--config <path>", "path to mar.config.json")
+    .option("--terminal-mode <headless|tmux>", "review execution backend")
+    .option("--tmux", "run reviewers through the tmux execution backend")
     .action(async (selector: string, opts: PullRequestReviewOptions) => {
       process.exitCode = await runPrReview(selector, opts);
     });

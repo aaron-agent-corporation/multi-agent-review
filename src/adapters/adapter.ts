@@ -22,6 +22,11 @@ export interface TurnRequest {
    * dir that physically lacks any peer's draft, making independence a filesystem fact.
    */
   cwd?: string;
+  /**
+   * Optional environment overlay for repo-local MAR credentials/config. Adapters merge this with
+   * any vendor-specific env they already set and never include values in redacted commands.
+   */
+  env?: Record<string, string>;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import fsExtra from "fs-extra";
 import { seedInstructions, type Vendor } from "../protocol/instructions.js";
+import { createAgentWorktree } from "../repo/git.js";
 import { isDone } from "./artifacts.js";
 import { artifactName } from "./layout.js";
 
@@ -69,6 +70,57 @@ export async function scopedWorkdir(
   // agent through its scoped cwd. assertSafeAgent above already contained the path under runDir.
   await seedInstructions(dir, vendor);
   return dir;
+}
+
+export interface DraftWorkspace {
+  /** Directory the vendor CLI should run from. */
+  cwd: string;
+  /** Directory where MAR should write the captured artifact. */
+  artifactDir: string;
+  /** Linked git worktree path when repo-aware execution is active. */
+  worktreePath?: string;
+  /** Human-readable hint prepended to the draft prompt. */
+  promptHint?: string;
+}
+
+export async function repoAwareDraftWorkspace(opts: {
+  runDir: string;
+  agent: string;
+  inputPath: string;
+  vendor: Vendor;
+  repoRoot: string;
+  commit: string;
+}): Promise<DraftWorkspace> {
+  assertSafeAgent(opts.agent);
+  const artifactDir = join(opts.runDir, "work", opts.agent);
+  await ensureDir(artifactDir);
+  await copy(opts.inputPath, join(artifactDir, "input.md"));
+  await seedInstructions(artifactDir, opts.vendor);
+
+  const worktree = await createAgentWorktree({
+    repoRoot: opts.repoRoot,
+    commit: opts.commit,
+    runDir: opts.runDir,
+    agent: opts.agent,
+  });
+  const marDir = join(worktree.path, ".mar");
+  await ensureDir(marDir);
+  await copy(opts.inputPath, join(marDir, "input.md"));
+  await seedInstructions(marDir, opts.vendor);
+
+  return {
+    cwd: worktree.path,
+    artifactDir,
+    worktreePath: worktree.path,
+    promptHint: [
+      "## Repo-aware MAR workspace",
+      "You are running from a disposable git worktree for this review.",
+      "You may inspect the repository files in this worktree.",
+      "Read `.mar/input.md` as the document under review.",
+      "Read the vendor instruction file inside `.mar/` as the MAR output format contract.",
+      "Do not intentionally edit files; accidental edits are isolated to this disposable worktree.",
+    ].join("\n"),
+  };
 }
 
 /**

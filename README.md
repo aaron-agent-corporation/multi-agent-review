@@ -58,10 +58,23 @@ npm link        # puts `mar` on your PATH
 
 ```sh
 mar init        # detect installed vendor CLIs, write a starter mar.config.json
+mar auth init   # create .mar/MAR.env for repo-local MAR credentials/config
 mar preflight   # check each roster agent is installed, authenticated, responsive
 mar run document.md --gated      # run the protocol, pausing at each phase gate
 mar run document.md --autonomous # run unattended end to end
 ```
+
+When `mar run` starts inside a git repository, repo-aware review is enabled by
+default. Each reviewer gets its own linked git worktree under
+`runs/<id>/worktrees/<agent>/`, rooted at the commit being reviewed. Draft turns run
+from those worktrees, so reviewers can inspect the full codebase while accidental
+edits stay isolated from the caller checkout and from other reviewers. Outside a git
+repository, MAR falls back to the document-only scoped workspace behavior.
+
+`mar auth init` creates `.mar/MAR.env`, `.mar/MAR.env.example`, and adds
+`.mar/MAR.env` to `.gitignore`. `mar preflight`, `mar run`, and `mar pr review` load
+that file before probing or invoking vendor CLIs. Secret values are never printed;
+status output names only loaded keys.
 
 In gated mode each phase boundary prompts: `approve` to continue, `feedback <note>`
 to steer the next phase (recorded with attribution in `gate-feedback/`), or `abort`.
@@ -98,6 +111,10 @@ commits, and patch text. Without `--post`, nothing is sent to GitHub. With `--po
 the final integration artifact is submitted with `gh pr review --comment --body-file`
 after the run reaches a completed or escalated terminal state.
 
+PR reviews are also repo-aware by default when the command runs from a checked-out
+repository. The generated PR brief remains the shared review target, but draft
+reviewers can inspect the full PR head tree from their own disposable worktrees.
+
 The repository also includes a self-hosted GitHub Action,
 `.github/workflows/mar-pr-review.yml`, that builds the CLI and runs the same command.
 It runs automatically on same-repository pull requests when they are opened,
@@ -109,6 +126,22 @@ Use a self-hosted runner that already has authenticated vendor CLIs available on
 GitHub-hosted runners do not satisfy the CLI-subscription constraint. The automatic
 workflow intentionally uses `pull_request`, not `pull_request_target`, and ignores
 forked PRs because it runs install/build scripts and local vendor CLIs on the runner.
+
+### Tmux mode
+
+MAR accepts a terminal backend setting:
+
+```sh
+mar run document.md --terminal-mode headless
+mar run document.md --tmux
+mar pr review 42 --tmux
+```
+
+`headless` is the default and fully implemented. `tmux` is currently a guarded
+execution seam: MAR validates that tmux exists and then fails clearly because the
+pane-backed reviewer runner is not implemented in this build. This keeps babysitter
+agent integration explicit instead of silently running headless while claiming to use
+tmux.
 
 ### Install in another repository
 

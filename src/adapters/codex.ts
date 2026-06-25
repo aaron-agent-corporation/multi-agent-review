@@ -46,6 +46,11 @@ export function makeCodexAdapter(bin = "codex", model?: string): AgentAdapter {
       // WR-04: the redacted argv (prompt body → placeholder) is the SAME array we spawn.
       // WR-02: redact by POSITION — codex puts the prompt as the TRAILING positional (last slot).
       const redactedCommand = redactArgvAt(argv, argv.length - 1);
+      const codexHome =
+        req.env?.MAR_CODEX_HOME ??
+        req.env?.CODEX_HOME ??
+        process.env.MAR_CODEX_HOME ??
+        `${homedir()}/.codex`;
       const result = await execa(cmd, argv, {
         timeout: req.timeoutMs, // wall-clock ms; subprocess terminated on overrun (D-17)
         killSignal: "SIGTERM",
@@ -55,7 +60,7 @@ export function makeCodexAdapter(bin = "codex", model?: string): AgentAdapter {
         // Codex CLI auth is stored under CODEX_HOME. Agent runtimes may set CODEX_HOME to their own
         // sandbox home, while `codex login` writes the user's normal ~/.codex/auth.json. Use that
         // standard store by default; MAR_CODEX_HOME is the explicit escape hatch for custom rosters.
-        env: { CODEX_HOME: process.env.MAR_CODEX_HOME ?? `${homedir()}/.codex` },
+        env: { ...(req.env ?? {}), CODEX_HOME: codexHome },
         // CRITICAL (02-05 live fix): close stdin. The prompt is passed as an argv positional, NEVER
         // via stdin — but `codex exec` BLOCKS on an open stdin pipe (execa's default), hanging every
         // invocation until the wall-clock timeout. `stdin:"ignore"` (no pipe) makes codex see EOF

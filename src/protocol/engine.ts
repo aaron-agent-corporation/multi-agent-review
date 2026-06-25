@@ -23,8 +23,14 @@ import { ResponseFrontmatter } from "../schema/response.js";
 import { ReviewFrontmatter } from "../schema/review.js";
 import { isDone, writeArtifact } from "../workspace/artifacts.js";
 import { nextSeq } from "../workspace/layout.js";
-import { addArtifact, addDroppedAgent, readManifest, setStatus } from "../workspace/manifest.js";
-import { promoteDrafts, scopedWorkdir } from "../workspace/scope.js";
+import {
+  addArtifact,
+  addDroppedAgent,
+  readManifest,
+  recordAgentWorktree,
+  setStatus,
+} from "../workspace/manifest.js";
+import { promoteDrafts, repoAwareDraftWorkspace, scopedWorkdir } from "../workspace/scope.js";
 import { type ConvergenceResult, runConvergence } from "./converge.js";
 import { writeDecisionRecord } from "./decision-record.js";
 import { parseAgentTurnFrontmatter, readAgentFrontmatter } from "./frontmatter.js";
@@ -101,6 +107,16 @@ export interface ProtocolInput {
    * note apply: the resumed phase consumes it, then it is cleared.
    */
   feedback?: string;
+  execution?: ProtocolExecution;
+}
+
+export interface ProtocolExecution {
+  env?: Record<string, string>;
+  repoAware?: {
+    sourceRepoRoot: string;
+    sourceCommit: string;
+  };
+  terminalMode?: "headless" | "tmux";
 }
 
 /** A roster agent that failed its turn in a phase, with the reason for the audit log. */
@@ -190,9 +206,6 @@ export async function runPhase(
       // feedback note (D-51), when present, is prepended as a clearly-attributed steering block for
       // THIS phase only (the caller threads it for exactly one phase, then clears it) — the thin
       // prompt below the note is unchanged, so the format contract still lives only in the seed.
-      const basePrompt = feedback
-        ? injectFeedback(phase.prompt({ inputPath, phaseName: phase.name }), feedback)
-        : phase.prompt({ inputPath, phaseName: phase.name });
       const promptRef = `phase:${phase.name}`;
       // PROT-04: the draft phase runs in an isolated per-agent cwd. Shared phases run in runDir, so
       // real CLIs cannot mutate the source repo that launched `mar`; they can only see the run
@@ -202,10 +215,38 @@ export async function runPhase(
       // is also WRITTEN into that per-agent dir (`work/<agent>/`), so a peer can never read it from
       // a shared location until promoteDrafts copies it at the boundary. Shared phases write straight
       // into the run dir.
-      const cwd = phase.scoped
-        ? await scopedWorkdir(runDir, entry.name, inputPath, entry.vendor)
-        : runDir;
-      const artifactDir = phase.scoped ? cwd : runDir;
+      let cwd = runDir;
+      let artifactDir = runDir;
+      let promptHint: string | undefined;
+      if (phase.scoped) {
+        if (input.execution?.repoAware) {
+          const draftWorkspace = await repoAwareDraftWorkspace({
+            runDir,
+            agent: entry.name,
+            inputPath,
+            vendor: entry.vendor,
+            repoRoot: input.execution.repoAware.sourceRepoRoot,
+            commit: input.execution.repoAware.sourceCommit,
+          });
+          cwd = draftWorkspace.cwd;
+          artifactDir = draftWorkspace.artifactDir;
+          promptHint = draftWorkspace.promptHint;
+          if (draftWorkspace.worktreePath) {
+            await recordAgentWorktree(runDir, {
+              agent: entry.name,
+              path: draftWorkspace.worktreePath,
+              retained: true,
+            });
+          }
+        } else {
+          cwd = await scopedWorkdir(runDir, entry.name, inputPath, entry.vendor);
+          artifactDir = cwd;
+        }
+      }
+
+      const phasePrompt = phase.prompt({ inputPath, phaseName: phase.name });
+      const hintedPrompt = promptHint ? `${phasePrompt}\n\n${promptHint}` : phasePrompt;
+      const basePrompt = feedback ? injectFeedback(hintedPrompt, feedback) : hintedPrompt;
 
       // One transport-retried turn for `promptText`, written to an artifact. Returns the written
       // artifact (ok) or a failure reason. The transport retry (withRetry / D-23) is DISTINCT from
@@ -225,6 +266,7 @@ export async function runPhase(
               runDir,
               seq,
               timeoutMs,
+              env: input.execution?.env,
               ...(cwd ? { cwd } : {}),
             }),
           {
@@ -1197,9 +1239,10 @@ export async function runProtocol(
   config: MarConfig,
   inputPath: string,
   gating?: GatingOptions,
+  execution?: ProtocolExecution,
 ): Promise<number> {
   const machine = buildMachine();
-  const actor = createActor(machine, { input: { runDir, config, inputPath, gating } });
+  const actor = createActor(machine, { input: { runDir, config, inputPath, gating, execution } });
   actor.start();
   await toPromise(actor);
   const snapshot = actor.getSnapshot();
@@ -1391,8 +1434,21 @@ export async function resumeProtocol(
   config: MarConfig,
   gating?: GatingOptions,
   feedback?: string,
+  execution?: ProtocolExecution,
 ): Promise<number> {
   const manifest = await readManifest(runDir); // (1) manifest integrity — fails closed if corrupt.
+  const manifestExecution =
+    manifest.execution?.repoAware &&
+    manifest.execution.sourceRepoRoot &&
+    manifest.execution.sourceCommit
+      ? {
+          repoAware: {
+            sourceRepoRoot: manifest.execution.sourceRepoRoot,
+            sourceCommit: manifest.execution.sourceCommit,
+          },
+          terminalMode: manifest.execution.terminalMode,
+        }
+      : undefined;
 
   // Refuse a terminal-done run: there is nothing left to resume.
   if ((TERMINAL_DONE as readonly string[]).includes(manifest.status)) {
@@ -1442,7 +1498,15 @@ export async function resumeProtocol(
   // resuming" behavior. A re-paused run again writes `paused-awaiting-approval`.
   const machine = buildMachine(resumePhase.name);
   const actor = createActor(machine, {
-    input: { runDir, config, inputPath, roster, gating, feedback },
+    input: {
+      runDir,
+      config,
+      inputPath,
+      roster,
+      gating,
+      feedback,
+      execution: execution ?? manifestExecution,
+    },
   });
   actor.start();
   await toPromise(actor);

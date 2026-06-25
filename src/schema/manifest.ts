@@ -29,6 +29,26 @@ export const DroppedAgent = z.object({
 
 export type DroppedAgent = z.infer<typeof DroppedAgent>;
 
+export const ExecutionWorktree = z.object({
+  agent: z.string(),
+  path: z.string(),
+  retained: z.boolean().default(true),
+  cleanedAt: z.string().optional(),
+});
+
+export type ExecutionWorktree = z.infer<typeof ExecutionWorktree>;
+
+export const ExecutionMetadata = z.object({
+  repoAware: z.boolean(),
+  sourceRepoRoot: z.string().optional(),
+  sourceCommit: z.string().optional(),
+  terminalMode: z.enum(["headless", "tmux"]).default("headless"),
+  tmuxSession: z.string().optional(),
+  worktrees: z.array(ExecutionWorktree).default([]),
+});
+
+export type ExecutionMetadata = z.infer<typeof ExecutionMetadata>;
+
 /**
  * Authoritative per-run index (D-14, PROT-07). Run state is always re-derivable from this
  * file on disk. `timeout` is kept distinct from `failed` for D-17 observability.
@@ -68,6 +88,7 @@ export const Manifest = z.object({
   // manifests (written before this field) parse unchanged; `mar resume` refuses a manifest that
   // lacks it (it cannot re-run phases without the input document).
   inputPath: z.string().optional(),
+  execution: ExecutionMetadata.optional(),
 });
 
 export type Manifest = z.infer<typeof Manifest>;

@@ -28,6 +28,15 @@ describe("MarConfig schema (discriminated union + defaults)", () => {
     expect(cfg.agents).toHaveLength(2);
     expect(cfg.defaults.retries).toBe(2);
     expect(cfg.defaults.timeoutMs).toBe(600_000);
+    expect(cfg.defaults.terminalMode).toBe("headless");
+  });
+
+  it("accepts tmux as the configured terminal mode", () => {
+    const cfg = MarConfig.parse({
+      ...TWO_AGENTS,
+      defaults: { terminalMode: "tmux" },
+    });
+    expect(cfg.defaults.terminalMode).toBe("tmux");
   });
 
   it("accepts grok as a supported fourth reviewer vendor", () => {

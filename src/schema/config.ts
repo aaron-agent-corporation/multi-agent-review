@@ -59,6 +59,7 @@ export const MarConfig = z
         // inside the `.prefault({})` block (NOT `.default`) so the nested default fires when
         // `defaults` is omitted (zod v4 prefault re-parses; default does not).
         mode: z.enum(["autonomous", "gated"]).default("autonomous"),
+        terminalMode: z.enum(["headless", "tmux"]).default("headless"),
       })
       .prefault({}),
   })

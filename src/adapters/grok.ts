@@ -71,6 +71,7 @@ export function makeGrokAdapter(bin = "grok", model?: string): AgentAdapter {
         reject: false,
         cleanup: true,
         stdin: "ignore",
+        ...(req.env ? { env: req.env } : {}),
         ...(req.cwd ? { cwd: req.cwd } : {}),
       });
 

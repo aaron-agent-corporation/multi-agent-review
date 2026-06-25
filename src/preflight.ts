@@ -95,6 +95,8 @@ export interface RunPreflightOptions {
   probeTimeoutMs?: number;
   /** Probe prompt (default "Reply with exactly: pong"). Tests inject fixture mode flags here. */
   probePrompt?: string;
+  /** Repo-local MAR env overlay loaded from .mar/MAR.env. */
+  env?: Record<string, string>;
 }
 
 /** Default probe prompt + timeout (D-33). */
@@ -209,6 +211,7 @@ export async function runPreflight(
           runDir: probeDir,
           seq: 0,
           timeoutMs: probeTimeoutMs,
+          env: opts?.env,
         }),
       { retries: 0, classify: CLASSIFY[agent.vendor], onAttempt: () => {} },
     );

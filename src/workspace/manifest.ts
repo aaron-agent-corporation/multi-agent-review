@@ -2,6 +2,8 @@ import { join } from "node:path";
 import fsExtra from "fs-extra";
 import {
   type DroppedAgent,
+  type ExecutionMetadata,
+  type ExecutionWorktree,
   Manifest,
   type ManifestArtifact,
   type ManifestStatus,
@@ -55,6 +57,7 @@ export interface CreateRunOptions {
   status?: ManifestStatus;
   /** The input document path this run was driven against (recorded for `mar resume` re-derivation). */
   inputPath?: string;
+  execution?: ExecutionMetadata;
 }
 
 /**
@@ -73,6 +76,7 @@ export async function createRun(opts: CreateRunOptions): Promise<Manifest> {
     artifacts: [],
     droppedAgents: [],
     ...(opts.inputPath !== undefined ? { inputPath: opts.inputPath } : {}),
+    ...(opts.execution !== undefined ? { execution: opts.execution } : {}),
   };
   await writeManifestAtomic(opts.runDir, manifest);
   return manifest;
@@ -150,6 +154,47 @@ export async function addDroppedAgent(runDir: string, entry: DroppedAgent): Prom
       ...current,
       updatedAt: new Date().toISOString(),
       droppedAgents: [...current.droppedAgents, entry],
+    };
+    await writeManifestAtomic(runDir, next);
+    return next;
+  });
+}
+
+export async function setExecutionMetadata(
+  runDir: string,
+  execution: ExecutionMetadata,
+): Promise<Manifest> {
+  return serializeWrite(runDir, async () => {
+    const current = await readManifest(runDir);
+    const next: Manifest = {
+      ...current,
+      execution,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeManifestAtomic(runDir, next);
+    return next;
+  });
+}
+
+export async function recordAgentWorktree(
+  runDir: string,
+  worktree: ExecutionWorktree,
+): Promise<Manifest> {
+  return serializeWrite(runDir, async () => {
+    const current = await readManifest(runDir);
+    const execution: ExecutionMetadata = current.execution ?? {
+      repoAware: true,
+      terminalMode: "headless",
+      worktrees: [],
+    };
+    const worktrees = [
+      ...execution.worktrees.filter((entry) => entry.agent !== worktree.agent),
+      worktree,
+    ];
+    const next: Manifest = {
+      ...current,
+      execution: { ...execution, worktrees },
+      updatedAt: new Date().toISOString(),
     };
     await writeManifestAtomic(runDir, next);
     return next;
