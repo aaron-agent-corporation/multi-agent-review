@@ -1,6 +1,6 @@
 {
   "name": "multi-agent-review",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Vendor-neutral orchestration of frontier-model CLIs through a structured adversarial review protocol.",
   "type": "module",
   "engines": {

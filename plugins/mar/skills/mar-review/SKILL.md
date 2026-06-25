@@ -25,7 +25,11 @@ it does not resolve:
 
 1. If the working directory has no `mar.config.json`, run `mar init`, show the user
    the detected roster, and ask them to confirm it before spending model invocations.
-2. Run `mar preflight`. Show the status table. The protocol refuses to run with fewer
+2. If the user wants repo-local credentials/config and `.mar/MAR.env` is missing,
+   offer to run `mar auth init`. This creates `.mar/MAR.env`, `.mar/MAR.env.example`,
+   and gitignores the local env file. Do not print or ask the user to paste secret
+   values into chat.
+3. Run `mar preflight`. Show the status table. The protocol refuses to run with fewer
    than 2 distinct healthy vendors (same-vendor agents share blind spots — there is no
    override). If the roster is below the floor, report which agent failed and why
    (auth decay is the common cause, especially gemini) and stop.
@@ -40,6 +44,11 @@ mar run <input-document> --gated --pause-and-exit
 
 If the user asked for unattended mode, use `mar run <input> --autonomous` instead and
 skip to step 5 when it exits.
+
+When launched inside a git repository, MAR is repo-aware by default: each reviewer gets
+its own disposable git worktree under `runs/<id>/worktrees/<agent>/` and can inspect
+the full codebase while accidental edits stay isolated. Do not create a PR just to
+review a plan/spec; `mar run <input>` is the correct path.
 
 Exit 0 with `paused-awaiting-approval` in `runs/<id>/manifest.json` means a phase
 completed and the run is waiting at the gate. Non-zero exit: read the stderr tail and
