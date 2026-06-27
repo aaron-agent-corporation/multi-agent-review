@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { TurnRequest } from "../src/adapters/adapter.js";
@@ -60,6 +63,7 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
   });
 
   it("flag-pinning: exact argv incl. --no-auto-update; --always-approve absent", async () => {
+    let observedHome = "";
     const execaMock = vi.fn().mockResolvedValue({
       stdout: '{"response":"pong","session_id":"abc"}',
       stderr: "",
@@ -77,6 +81,7 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
 
     expect(execaMock).toHaveBeenCalledTimes(1);
     const [bin, argv, opts] = execaMock.mock.calls[0];
+    observedHome = opts.env.HOME;
     expect(bin).toBe("grok");
     expect(argv).toEqual([
       "-p",
@@ -95,6 +100,54 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
     expect(argv).not.toContain("--always-approve");
     expect(opts.reject).toBe(false);
     expect(opts.timeout).toBe(5000);
+    expect(opts.env.HOME).toContain("mar-grok-home-");
+    expect(opts.env.GROK_HOME).toBe(`${opts.env.HOME}/.grok`);
+    expect(opts.env.GROK_CURSOR_MCPS_ENABLED).toBe("0");
+    expect(opts.env.GROK_CLAUDE_MCPS_ENABLED).toBe("0");
+    expect(existsSync(observedHome)).toBe(false);
+
+    vi.doUnmock("execa");
+    vi.resetModules();
+  });
+
+  it("writes a minimal isolated Grok config during invocation and preserves env overlay", async () => {
+    let observedHome = "";
+    const sourceHome = mkdtempSync(join(tmpdir(), "mar-grok-source-"));
+    const sourceGrokHome = join(sourceHome, ".grok");
+    mkdirSync(sourceGrokHome, { recursive: true });
+    writeFileSync(join(sourceGrokHome, "auth.json"), '{"token":"test"}');
+    const execaMock = vi.fn().mockImplementation((_bin, _argv, opts) => {
+      observedHome = opts.env.HOME;
+      const config = readFileSync(`${opts.env.GROK_HOME}/config.toml`, "utf8");
+      expect(config).toContain("[compat.cursor]");
+      expect(config).toContain("mcps = false");
+      expect(readFileSync(`${opts.env.GROK_HOME}/auth.json`, "utf8")).toBe('{"token":"test"}');
+      expect(opts.env.ANTHROPIC_API_KEY).toBe("secret");
+      return Promise.resolve({
+        stdout: '{"response":"pong","session_id":"abc"}',
+        stderr: "",
+        exitCode: 0,
+        durationMs: 5,
+        timedOut: false,
+        isForcefullyTerminated: false,
+      });
+    });
+    vi.doMock("execa", () => ({ execa: execaMock }));
+    vi.resetModules();
+    const { makeGrokAdapter: fresh } = await import("../src/adapters/grok.js");
+
+    try {
+      const adapter = fresh("grok");
+      await adapter.invoke({
+        ...req("hello world"),
+        env: { ANTHROPIC_API_KEY: "secret", GROK_HOME: sourceGrokHome },
+      });
+    } finally {
+      rmSync(sourceHome, { recursive: true, force: true });
+    }
+
+    expect(execaMock).toHaveBeenCalledTimes(1);
+    expect(existsSync(observedHome)).toBe(false);
 
     vi.doUnmock("execa");
     vi.resetModules();
