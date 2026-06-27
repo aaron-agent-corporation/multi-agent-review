@@ -97,6 +97,8 @@ jobs:
           post: \${{ env.MAR_POST_REVIEW }}
           notify-webhook-url: \${{ secrets.MAR_NOTIFY_WEBHOOK_URL }}
           notify-webhook-token: \${{ secrets.MAR_NOTIFY_WEBHOOK_TOKEN }}
+          notify-kind: \${{ vars.MAR_NOTIFY_KIND || 'claude-code-channel' }}
+          notify-target: \${{ secrets.MAR_NOTIFY_TARGET || vars.MAR_NOTIFY_TARGET || 'default' }}
           github-token: \${{ github.token }}
 `;
 }

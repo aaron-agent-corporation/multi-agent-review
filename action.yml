@@ -18,13 +18,21 @@ inputs:
     required: false
     default: "true"
   notify-webhook-url:
-    description: Trusted MAR completion relay URL. PR bodies only opt in and name a target.
+    description: Trusted MAR completion relay URL.
     required: false
     default: ""
   notify-webhook-token:
     description: Optional bearer token for the MAR completion relay.
     required: false
     default: ""
+  notify-kind:
+    description: Trusted fallback notification kind used when the PR has no marker or trailer.
+    required: false
+    default: claude-code-channel
+  notify-target:
+    description: Trusted fallback notification target used when the PR has no marker or trailer.
+    required: false
+    default: default
   github-token:
     description: GitHub token used by gh to read and post pull request reviews.
     required: true
@@ -59,6 +67,8 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         MAR_NOTIFY_WEBHOOK_URL: ${{ inputs.notify-webhook-url }}
         MAR_NOTIFY_WEBHOOK_TOKEN: ${{ inputs.notify-webhook-token }}
+        MAR_NOTIFY_KIND: ${{ inputs.notify-kind }}
+        MAR_NOTIFY_TARGET: ${{ inputs.notify-target }}
         MAR_CONFIG: ${{ github.action_path }}/mar.config.json
         MAR_MODE: ${{ inputs.mode }}
         POST_REVIEW: ${{ inputs.post }}

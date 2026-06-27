@@ -79,6 +79,8 @@ interface PullRequestNotifyOptions {
   statusContext?: string;
   repository?: string;
   webhookUrl?: string;
+  kind?: string;
+  target?: string;
   timeout?: string;
 }
 
@@ -659,6 +661,8 @@ async function runPrNotify(selector: string, opts: PullRequestNotifyOptions = {}
       ...(opts.statusContext ? { statusContext: opts.statusContext } : {}),
       ...(opts.repository ? { repository: opts.repository } : {}),
       ...(opts.webhookUrl ? { webhookUrl: opts.webhookUrl } : {}),
+      ...(opts.kind ? { defaultKind: opts.kind } : {}),
+      ...(opts.target ? { defaultTarget: opts.target } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
     if (result.sent) {
@@ -954,6 +958,11 @@ export function buildProgram(): Command {
     .option("--status-context <name>", "GitHub status context name")
     .option("--repository <owner/repo>", "repository name (defaults to GITHUB_REPOSITORY)")
     .option("--webhook-url <url>", "notification relay URL (defaults to MAR_NOTIFY_WEBHOOK_URL)")
+    .option("--kind <kind>", "trusted fallback notification kind (defaults to MAR_NOTIFY_KIND)")
+    .option(
+      "--target <target>",
+      "trusted fallback notification target (defaults to MAR_NOTIFY_TARGET)",
+    )
     .option("--timeout <ms>", "notification HTTP timeout in milliseconds")
     .action(async (selector: string, opts: PullRequestNotifyOptions) => {
       process.exitCode = await runPrNotify(selector, opts);

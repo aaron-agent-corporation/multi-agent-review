@@ -167,6 +167,50 @@ target: mar-relay:abc123
     expect(sent).toBe(false);
   });
 
+  it("uses a trusted default target when the PR did not opt in", async () => {
+    const requests: NotificationRequest[] = [];
+    setGhRunner(async (args) => {
+      if (args[0] === "pr" && args[1] === "view") {
+        return {
+          stdout: JSON.stringify({
+            number: 42,
+            url: "https://github.com/acme/widgets/pull/42",
+            title: "Improve widget parser",
+            body: "No notification requested.",
+            headRefOid: "abc123",
+          }),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      if (args[0] === "api") {
+        return {
+          stdout: JSON.stringify({ commit: { message: "feat: no notification trailer\n" } }),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "", stderr: `unexpected gh call: ${args.join(" ")}`, exitCode: 1 };
+    });
+
+    const result = await notifyPullRequestCompletion("42", {
+      status: "success",
+      repository: "acme/widgets",
+      runUrl: "https://github.com/acme/widgets/actions/runs/99",
+      webhookUrl: "https://relay.example.test/mar",
+      defaultKind: "claude-code-channel",
+      defaultTarget: "mar-relay:default",
+      send: async (request) => {
+        requests.push(request);
+        return { ok: true, status: 202, text: "" };
+      },
+    });
+
+    expect(result).toMatchObject({ sent: true });
+    expect(requests[0].payload.kind).toBe("claude-code-channel");
+    expect(requests[0].payload.target).toBe("mar-relay:default");
+  });
+
   it("reports marker-not-found before webhook setup when the PR never opted in", async () => {
     let sent = false;
     setGhRunner(async (args) => {
@@ -284,6 +328,7 @@ MAR-Notify: claude-code-channel mar-relay:from-commit
       repository: "acme/widgets",
       runUrl: "https://github.com/acme/widgets/actions/runs/99",
       webhookUrl: "https://relay.example.test/mar",
+      defaultTarget: "mar-relay:default",
       send: async (request) => {
         requests.push(request);
         return { ok: true, status: 202, text: "accepted" };

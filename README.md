@@ -236,8 +236,21 @@ and `issues: write` is required for the failure comment.
 
 ### PR completion notifications
 
-The reusable action can notify an external relay after a MAR review completes. The
-PR body controls only whether to notify and which logical target to name:
+The reusable action can notify an external relay after a MAR review completes. To
+make the loop automatic for every PR review, configure the trusted workflow with a
+relay URL/token. The target defaults to `default`; set `MAR_NOTIFY_TARGET` only when
+your relay needs to route to a specific agent or channel:
+
+```yaml
+with:
+  notify-webhook-url: ${{ secrets.MAR_NOTIFY_WEBHOOK_URL }}
+  notify-webhook-token: ${{ secrets.MAR_NOTIFY_WEBHOOK_TOKEN }}
+  notify-kind: ${{ vars.MAR_NOTIFY_KIND || 'claude-code-channel' }}
+  notify-target: ${{ secrets.MAR_NOTIFY_TARGET || vars.MAR_NOTIFY_TARGET || 'default' }}
+```
+
+With a webhook URL and target available, MAR sends the completion payload for every
+review. The PR body can still override the trusted default target for a specific PR:
 
 ```md
 <!-- mar-notify-v1
@@ -260,22 +273,15 @@ MAR-Notify: claude-code-channel mar-relay:abc123
 ```
 
 On completion, MAR reads the PR body marker first. If that marker is absent, it reads
-the PR head commit and uses the `MAR-Notify` trailer. Existing commits are not
-rewritten; after installing the hook, amend the latest commit or add the PR body
-marker manually if the PR already exists.
+the PR head commit and uses the `MAR-Notify` trailer. If neither exists, it falls
+back to the trusted `notify-kind`/`notify-target` values from workflow configuration.
+Existing commits are not rewritten; after installing the hook, amend the latest
+commit or add the PR body marker manually if the PR already exists and needs a
+non-default target.
 
-Configure the actual relay URL and secret in trusted workflow configuration, not
-in the PR body:
-
-```yaml
-with:
-  notify-webhook-url: ${{ secrets.MAR_NOTIFY_WEBHOOK_URL }}
-  notify-webhook-token: ${{ secrets.MAR_NOTIFY_WEBHOOK_TOKEN }}
-```
-
-When the marker is present and `notify-webhook-url` is set, MAR posts a compact
-JSON payload containing the status, repository, PR URL, head SHA, run URL, status
-context, marker `kind`, and marker `target`. Missing markers or missing webhook
+When `notify-webhook-url` and a target are set, MAR posts a compact JSON payload
+containing the status, repository, PR URL, head SHA, run URL, status context,
+notification `kind`, and notification `target`. Missing target or missing webhook
 configuration are clean no-ops. Webhook delivery failures are warnings and do not
 change the MAR review result.
 

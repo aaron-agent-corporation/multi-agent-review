@@ -54,6 +54,8 @@ export interface NotifyPullRequestCompletionOptions extends GhRunOptions {
   headSha?: string;
   webhookUrl?: string;
   webhookToken?: string;
+  defaultKind?: string;
+  defaultTarget?: string;
   timeoutMs?: number;
   send?: NotificationSender;
 }
@@ -153,6 +155,23 @@ function bearerTokenHeader(token: string | undefined): Record<string, string> {
   return trimmed ? { authorization: `Bearer ${trimmed}` } : {};
 }
 
+function trustedDefaultMarker(
+  kind: string | undefined,
+  target: string | undefined,
+): PullRequestNotificationMarker | undefined {
+  const trimmedTarget = target?.trim();
+  if (!trimmedTarget || trimmedTarget.length > 512) return undefined;
+
+  const trimmedKind = (kind?.trim() || "claude-code-channel").trim();
+  if (!trimmedKind || /\s/.test(trimmedKind) || trimmedKind.length > 80) return undefined;
+
+  return {
+    kind: trimmedKind,
+    target: trimmedTarget,
+    fields: { kind: trimmedKind, target: trimmedTarget },
+  };
+}
+
 async function fetchCommitNotificationMarker(
   repository: string,
   headSha: string,
@@ -175,7 +194,11 @@ export async function notifyPullRequestCompletion(
     parsePullRequestNotificationMarker(pr.body) ??
     (repository !== "unknown" && headSha
       ? await fetchCommitNotificationMarker(repository, headSha, opts)
-      : undefined);
+      : undefined) ??
+    trustedDefaultMarker(
+      opts.defaultKind ?? process.env.MAR_NOTIFY_KIND,
+      opts.defaultTarget ?? process.env.MAR_NOTIFY_TARGET,
+    );
   if (!marker) return { sent: false, reason: "marker-not-found" };
 
   const webhookUrl = opts.webhookUrl ?? process.env.MAR_NOTIFY_WEBHOOK_URL;

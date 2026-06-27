@@ -61,8 +61,13 @@ After installation:
 3. Tell the user the follow-up operational checks:
    - self-hosted runner is online for that repo;
    - vendor CLIs are authenticated on that runner;
-   - optional `MAR_NOTIFY_WEBHOOK_URL` and `MAR_NOTIFY_WEBHOOK_TOKEN` secrets are set
-     if they want completion notifications.
+   - optional `MAR_NOTIFY_WEBHOOK_URL` and `MAR_NOTIFY_WEBHOOK_TOKEN` secrets are
+     set if they want completion notifications to loop back automatically after
+     every MAR run;
+   - optional `MAR_NOTIFY_TARGET` secret or repo variable is set if their relay
+     needs a route other than the built-in `default` target;
+   - optional `MAR_NOTIFY_KIND` repo variable is set if the relay target is not a
+     `claude-code-channel`.
 
 ## Hard rules
 
