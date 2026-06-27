@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execa } from "execa";
@@ -60,11 +60,21 @@ type GrokRuntime = {
   cleanup: () => Promise<void>;
 };
 
-async function copyIfPresent(source: string, destination: string): Promise<void> {
+async function mtimeMs(path: string): Promise<number | undefined> {
   try {
-    await copyFile(source, destination);
+    return (await stat(path)).mtimeMs;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return undefined;
+  }
+}
+
+async function copyIfSourceNewer(source: string, destination: string): Promise<void> {
+  const sourceMtime = await mtimeMs(source);
+  if (sourceMtime === undefined) return;
+  const destinationMtime = await mtimeMs(destination);
+  if (destinationMtime === undefined || sourceMtime > destinationMtime) {
+    await copyFile(source, destination);
   }
 }
 
@@ -72,15 +82,21 @@ async function prepareIsolatedGrokRuntime(
   env: Record<string, string> | undefined,
 ): Promise<GrokRuntime> {
   const sourceHome = env?.HOME ?? process.env.HOME;
-  const sourceGrokHome = env?.GROK_HOME ?? (sourceHome ? join(sourceHome, ".grok") : undefined);
+  const sourceGrokHome =
+    env?.GROK_HOME ?? process.env.GROK_HOME ?? (sourceHome ? join(sourceHome, ".grok") : undefined);
   const tempHome = await mkdtemp(join(tmpdir(), "mar-grok-home-"));
-  const tempGrokHome = join(tempHome, ".grok");
+  const runtimeGrokHome =
+    env?.MAR_GROK_HOME ??
+    process.env.MAR_GROK_HOME ??
+    (sourceGrokHome ? join(sourceGrokHome, "mar-runtime") : join(tempHome, ".grok"));
 
-  await mkdir(tempGrokHome, { recursive: true });
-  if (sourceGrokHome) {
-    await copyIfPresent(join(sourceGrokHome, "auth.json"), join(tempGrokHome, "auth.json"));
+  // HOME is temporary to hide ~/.claude and ~/.cursor compatibility imports; GROK_HOME is
+  // persistent so OAuth/device-token refreshes survive across MAR turns and workflow runs.
+  await mkdir(runtimeGrokHome, { recursive: true });
+  if (sourceGrokHome && sourceGrokHome !== runtimeGrokHome) {
+    await copyIfSourceNewer(join(sourceGrokHome, "auth.json"), join(runtimeGrokHome, "auth.json"));
   }
-  await writeFile(join(tempGrokHome, "config.toml"), ISOLATED_GROK_CONFIG, "utf8");
+  await writeFile(join(runtimeGrokHome, "config.toml"), ISOLATED_GROK_CONFIG, "utf8");
 
   return {
     env: {
@@ -98,8 +114,9 @@ async function prepareIsolatedGrokRuntime(
       GROK_CLAUDE_AGENTS_ENABLED: "0",
       GROK_CLAUDE_MCPS_ENABLED: "0",
       GROK_CLAUDE_HOOKS_ENABLED: "0",
+      MAR_GROK_HOME: runtimeGrokHome,
       HOME: tempHome,
-      GROK_HOME: tempGrokHome,
+      GROK_HOME: runtimeGrokHome,
     },
     cleanup: () => rm(tempHome, { recursive: true, force: true }),
   };

@@ -76,6 +76,12 @@ repository, MAR falls back to the document-only scoped workspace behavior.
 that file before probing or invoking vendor CLIs. Secret values are never printed;
 status output names only loaded keys.
 
+For Grok, MAR defaults to a persistent isolated runtime home at
+`~/.grok/mar-runtime`: it keeps refreshed Grok auth while hiding unrelated
+Claude/Cursor MCP and plugin config from headless review turns. Set
+`MAR_GROK_HOME` in `.mar/MAR.env` only if you want that persistent Grok runtime
+somewhere else.
+
 In gated mode each phase boundary prompts: `approve` to continue, `feedback <note>`
 to steer the next phase (recorded with attribution in `gate-feedback/`), or `abort`.
 

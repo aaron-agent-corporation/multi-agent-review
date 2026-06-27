@@ -2,15 +2,27 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import type { TurnRequest } from "../src/adapters/adapter.js";
 import { makeGrokAdapter } from "../src/adapters/grok.js";
 import { GrokJson } from "../src/schema/turn.js";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-grok.mjs", import.meta.url));
+const TEST_HOME = mkdtempSync(join(tmpdir(), "mar-grok-test-home-"));
+
+afterAll(() => {
+  rmSync(TEST_HOME, { recursive: true, force: true });
+});
 
 function req(promptText: string, timeoutMs = 5000): TurnRequest {
-  return { agent: "grok", promptText, runDir: "runs/test", seq: 1, timeoutMs };
+  return {
+    agent: "grok",
+    promptText,
+    runDir: "runs/test",
+    seq: 1,
+    timeoutMs,
+    env: { HOME: TEST_HOME },
+  };
 }
 
 describe("GrokJson schema (drift-safe, tolerates extra keys)", () => {
@@ -99,7 +111,8 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
     expect(opts.reject).toBe(false);
     expect(opts.timeout).toBe(5000);
     expect(opts.env.HOME).toContain("mar-grok-home-");
-    expect(opts.env.GROK_HOME).toBe(`${opts.env.HOME}/.grok`);
+    expect(opts.env.GROK_HOME).toBe(join(TEST_HOME, ".grok", "mar-runtime"));
+    expect(opts.env.MAR_GROK_HOME).toBe(join(TEST_HOME, ".grok", "mar-runtime"));
     expect(opts.env.GROK_CURSOR_MCPS_ENABLED).toBe("0");
     expect(opts.env.GROK_CLAUDE_MCPS_ENABLED).toBe("0");
     expect(existsSync(observedHome)).toBe(false);
@@ -149,6 +162,49 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
 
     vi.doUnmock("execa");
     vi.resetModules();
+  });
+
+  it("preserves Grok auth refreshes in a persistent isolated runtime home", async () => {
+    let observedHome = "";
+    const sourceHome = mkdtempSync(join(tmpdir(), "mar-grok-source-"));
+    const sourceGrokHome = join(sourceHome, ".grok");
+    const runtimeGrokHome = join(sourceGrokHome, "mar-runtime");
+    mkdirSync(sourceGrokHome, { recursive: true });
+    writeFileSync(join(sourceGrokHome, "auth.json"), '{"token":"stale"}');
+
+    const execaMock = vi.fn().mockImplementation((_bin, _argv, opts) => {
+      observedHome = opts.env.HOME;
+      expect(opts.env.GROK_HOME).toBe(runtimeGrokHome);
+      writeFileSync(join(opts.env.GROK_HOME, "auth.json"), '{"token":"refreshed"}');
+      return Promise.resolve({
+        stdout: '{"response":"pong","session_id":"abc"}',
+        stderr: "",
+        exitCode: 0,
+        durationMs: 5,
+        timedOut: false,
+        isForcefullyTerminated: false,
+      });
+    });
+    vi.doMock("execa", () => ({ execa: execaMock }));
+    vi.resetModules();
+    const { makeGrokAdapter: fresh } = await import("../src/adapters/grok.js");
+
+    try {
+      await fresh("grok").invoke({
+        ...req("hello world"),
+        env: { HOME: sourceHome },
+      });
+
+      expect(execaMock).toHaveBeenCalledTimes(1);
+      expect(existsSync(observedHome)).toBe(false);
+      expect(readFileSync(join(runtimeGrokHome, "auth.json"), "utf8")).toBe(
+        '{"token":"refreshed"}',
+      );
+    } finally {
+      rmSync(sourceHome, { recursive: true, force: true });
+      vi.doUnmock("execa");
+      vi.resetModules();
+    }
   });
 
   it("flag-pinning with model: makeGrokAdapter(bin, 'grok-build') appends ['-m','grok-build']", async () => {

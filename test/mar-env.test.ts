@@ -55,6 +55,7 @@ describe("ensureMarEnv", () => {
     const result = await ensureMarEnv(workdir);
     expect(existsSync(result.envPath)).toBe(true);
     expect(existsSync(result.examplePath)).toBe(true);
+    expect(readFileSync(result.examplePath, "utf8")).toContain("MAR_GROK_HOME=");
     expect(readFileSync(result.gitignorePath, "utf8")).toContain(".mar/MAR.env");
     expect(statSync(result.envPath).mode & 0o777).toBe(0o600);
   });

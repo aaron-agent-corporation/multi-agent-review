@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 function mockExeca(stdout: string) {
   const calls: Array<{ cmd: string; argv: string[]; opts: Record<string, unknown> }> = [];
@@ -18,14 +21,26 @@ function mockExeca(stdout: string) {
   return calls;
 }
 
+const grokSourceHome = mkdtempSync(join(tmpdir(), "mar-grok-env-source-"));
+const grokHome = join(grokSourceHome, "runtime");
+
 const req = {
   agent: "x",
   promptText: "ping",
   runDir: "/tmp/x",
   seq: 0,
   timeoutMs: 1000,
-  env: { ANTHROPIC_API_KEY: "secret", MAR_CODEX_HOME: "/tmp/codex-home" },
+  env: {
+    ANTHROPIC_API_KEY: "secret",
+    HOME: grokSourceHome,
+    MAR_CODEX_HOME: "/tmp/codex-home",
+    MAR_GROK_HOME: grokHome,
+  },
 };
+
+afterAll(() => {
+  rmSync(grokSourceHome, { recursive: true, force: true });
+});
 
 afterEach(() => {
   vi.resetModules();
@@ -62,6 +77,10 @@ describe("adapter env threading", () => {
     const calls = mockExeca(JSON.stringify({ response: "pong" }));
     const { makeGrokAdapter } = await import("../src/adapters/grok.js");
     await makeGrokAdapter("grok").invoke(req);
-    expect(calls[0].opts.env).toMatchObject({ ANTHROPIC_API_KEY: "secret" });
+    expect(calls[0].opts.env).toMatchObject({
+      ANTHROPIC_API_KEY: "secret",
+      MAR_GROK_HOME: grokHome,
+      GROK_HOME: grokHome,
+    });
   });
 });
