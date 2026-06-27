@@ -167,9 +167,6 @@ export async function notifyPullRequestCompletion(
   selector: string,
   opts: NotifyPullRequestCompletionOptions,
 ): Promise<NotificationResult> {
-  const webhookUrl = opts.webhookUrl ?? process.env.MAR_NOTIFY_WEBHOOK_URL;
-  if (!webhookUrl) return { sent: false, reason: "missing-webhook-url" };
-
   const prRaw = await ghJson(["pr", "view", selector, "--json", NOTIFY_PR_FIELDS.join(",")], opts);
   const pr = NotifyPullRequestView.parse(prRaw);
   const repository = opts.repository ?? process.env.GITHUB_REPOSITORY ?? "unknown";
@@ -180,6 +177,9 @@ export async function notifyPullRequestCompletion(
       ? await fetchCommitNotificationMarker(repository, headSha, opts)
       : undefined);
   if (!marker) return { sent: false, reason: "marker-not-found" };
+
+  const webhookUrl = opts.webhookUrl ?? process.env.MAR_NOTIFY_WEBHOOK_URL;
+  if (!webhookUrl) return { sent: false, reason: "missing-webhook-url" };
 
   const payload: NotificationPayload = {
     event: "mar.review.completed",

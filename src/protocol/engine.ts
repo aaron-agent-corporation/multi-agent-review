@@ -601,7 +601,15 @@ async function enforceRelitigation(runDir: string, kind: string): Promise<void> 
   const manifest = await readManifest(runDir);
   const drops: RelitigationDrop[] = [];
   for (const art of manifest.artifacts.filter((a) => a.kind === kind)) {
-    const data = await readAgentFrontmatter(join(runDir, art.path));
+    let data: unknown | null;
+    try {
+      data = await readAgentFrontmatter(join(runDir, art.path));
+    } catch {
+      // Relitigation detection is best-effort enforcement over later positions. Validation
+      // artifacts are intentionally free-form, so a markdown horizontal rule must not become a
+      // protocol-fatal YAML parse error.
+      data = null;
+    }
     if (data === null) continue;
     const drop = enforceDrop(art.path, ids, data);
     if (drop) drops.push(drop);

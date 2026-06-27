@@ -387,3 +387,62 @@ it("honors per-agent timeoutMs while preserving the surviving multi-vendor roste
     ]),
   );
 });
+
+it("does not crash when validation prose begins with a markdown rule after relitigation ledger exists", async () => {
+  const fixture = join(workdir, "validation-rule-fixture.mjs");
+  writeFileSync(
+    fixture,
+    `
+const args = process.argv.slice(2);
+const text = args.join("\\n");
+const phase = /\\[phase:([a-z]+)\\]/.exec(text)?.[1] ?? "draft";
+const isCodex = args[0] === "exec";
+const author = isCodex ? "codex" : "claude";
+
+function artifact(kind) {
+  if (kind === "review") {
+    return \`---\\nphase: review\\nauthor: \${author}\\ntargets: peer-draft\\nissues:\\n  - n: 1\\n    severity: P1\\n    question: "Does the proposal handle the empty-input case?"\\n---\\n\\n# Review\\n\`;
+  }
+  if (kind === "response") {
+    if (author === "claude") {
+      return \`---\\nphase: response\\nauthor: \${author}\\nreviewOf: peer-review\\nresponses:\\n  - verdict: reject-with-reason\\n    issueRef: 1\\n    reason: "settled fork for relitigation ledger"\\n---\\n\\n# Response\\n\`;
+    }
+    return \`---\\nphase: response\\nauthor: \${author}\\nreviewOf: peer-review\\nresponses:\\n  - verdict: accept\\n    issueRef: 1\\n---\\n\\n# Response\\n\`;
+  }
+  if (kind === "evaluation") {
+    return \`---\\nphase: evaluation\\nauthor: \${author}\\nround: 1\\nproposedBase: claude\\nremainingDisagreements: []\\ncitations: []\\n---\\n\\n# Evaluation\\n\`;
+  }
+  if (kind === "integration") {
+    return \`---\\nphase: integration\\nauthor: \${author}\\nbase: claude\\nadditions:\\n  - verdict: merged\\n    additionRef: issue-1\\n---\\n\\n# Integrated\\n\`;
+  }
+  if (kind === "validation") {
+    return \`---\\n**PASS with corrections.** The integrated result is acceptable.\\n\`;
+  }
+  return \`\${author}:\${kind}\\n\`;
+}
+
+const body = artifact(phase);
+if (isCodex) {
+  process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: body } }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");
+} else {
+  process.stdout.write(JSON.stringify({ is_error: false, result: body, duration_ms: 1 }));
+}
+`,
+    "utf8",
+  );
+  const config = baseConfig([
+    { name: "claude", vendor: "claude", bin: `node ${fixture}` },
+    { name: "codex", vendor: "codex", bin: `node ${fixture}` },
+  ]);
+
+  const exit = await runProtocol(runDir, config, inputPath);
+  expect(exit).toBe(0);
+
+  const manifest = JSON.parse(readFileSync(join(runDir, "manifest.json"), "utf8"));
+  expect(manifest.status).toBe("completed");
+  expect(existsSync(join(runDir, "shared", "resolved-decisions.md"))).toBe(true);
+  expect(manifest.artifacts.filter((a: { kind: string }) => a.kind === "validation")).toHaveLength(
+    2,
+  );
+});

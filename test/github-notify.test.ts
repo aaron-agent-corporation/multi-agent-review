@@ -167,6 +167,82 @@ target: mar-relay:abc123
     expect(sent).toBe(false);
   });
 
+  it("reports marker-not-found before webhook setup when the PR never opted in", async () => {
+    let sent = false;
+    setGhRunner(async (args) => {
+      if (args[0] === "pr" && args[1] === "view") {
+        return {
+          stdout: JSON.stringify({
+            number: 42,
+            url: "https://github.com/acme/widgets/pull/42",
+            title: "Improve widget parser",
+            body: "No notification requested.",
+            headRefOid: "abc123",
+          }),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      if (args[0] === "api") {
+        return {
+          stdout: JSON.stringify({ commit: { message: "feat: no notification trailer\n" } }),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "", stderr: `unexpected gh call: ${args.join(" ")}`, exitCode: 1 };
+    });
+
+    const result = await notifyPullRequestCompletion("42", {
+      status: "failure",
+      repository: "acme/widgets",
+      runUrl: "https://github.com/acme/widgets/actions/runs/99",
+      send: async () => {
+        sent = true;
+        return { ok: true, status: 202, text: "" };
+      },
+    });
+
+    expect(result).toEqual({ sent: false, reason: "marker-not-found" });
+    expect(sent).toBe(false);
+  });
+
+  it("reports missing webhook only after the PR opts in", async () => {
+    let sent = false;
+    setGhRunner(async (args) => {
+      if (args[0] === "pr" && args[1] === "view") {
+        return {
+          stdout: JSON.stringify({
+            number: 42,
+            url: "https://github.com/acme/widgets/pull/42",
+            title: "Improve widget parser",
+            body: `<!-- mar-notify-v1
+kind: claude-code-channel
+target: mar-relay:abc123
+-->`,
+            headRefOid: "abc123",
+          }),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "", stderr: `unexpected gh call: ${args.join(" ")}`, exitCode: 1 };
+    });
+
+    const result = await notifyPullRequestCompletion("42", {
+      status: "failure",
+      repository: "acme/widgets",
+      runUrl: "https://github.com/acme/widgets/actions/runs/99",
+      send: async () => {
+        sent = true;
+        return { ok: true, status: 202, text: "" };
+      },
+    });
+
+    expect(result).toEqual({ sent: false, reason: "missing-webhook-url" });
+    expect(sent).toBe(false);
+  });
+
   it("falls back to the head commit MAR-Notify trailer when the PR body has no marker", async () => {
     const ghCalls: string[][] = [];
     const requests: NotificationRequest[] = [];
