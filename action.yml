@@ -86,6 +86,42 @@ runs:
             >/dev/null
         }
 
+        find_status_comment_id() {
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/comments" \
+            --jq ".[] | select(.body | startswith(\"${comment_marker}\")) | .id" \
+            | tail -n 1
+        }
+
+        post_success_comment() {
+          if [[ -z "$pr_number" ]]; then
+            return 0
+          fi
+
+          local comment_id
+          comment_id="$(find_status_comment_id)"
+          if [[ -z "$comment_id" ]]; then
+            return 0
+          fi
+
+          local body_file="${RUNNER_TEMP:-/tmp}/mar-success-comment-${GITHUB_RUN_ID:-$$}.md"
+          cat > "$body_file" <<EOF
+        ${comment_marker}
+        ## MAR multi-agent review completed
+
+        The latest MAR workflow completed and posted a unified PR review.
+
+        - Workflow run: ${RUN_URL}
+        - Status context: ${status_context}
+        EOF
+
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
+            -F "body=@${body_file}" \
+            >/dev/null
+        }
+
         post_failure_comment() {
           local code="$1"
           if [[ -z "$pr_number" ]]; then
@@ -111,10 +147,7 @@ runs:
         EOF
 
           local comment_id
-          comment_id="$(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/comments" \
-            --jq ".[] | select(.body | startswith(\"${comment_marker}\")) | .id" \
-            | tail -n 1)"
+          comment_id="$(find_status_comment_id)"
 
           if [[ -n "$comment_id" ]]; then
             gh api \
@@ -145,6 +178,7 @@ runs:
           if [[ -n "$status_sha" ]]; then
             if [[ "$code" -eq 0 ]]; then
               set_mar_status success "MAR multi-agent review completed" || true
+              post_success_comment || echo "::warning::Unable to update MAR status comment. Add 'issues: write' to workflow permissions."
               post_completion_notification success || echo "::warning::Unable to send MAR completion notification."
             else
               set_mar_status failure "MAR multi-agent review failed" || true

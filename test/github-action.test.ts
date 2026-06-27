@@ -34,6 +34,8 @@ describe("GitHub Action PR review wrapper", () => {
     expect(action).toContain("headRefOid");
     expect(action).toContain("number");
     expect(action).toContain("repos/$" + "{GITHUB_REPOSITORY}/statuses/$" + "{status_sha}");
+    expect(action).toContain("find_status_comment_id");
+    expect(action).toContain("post_success_comment");
     expect(action).toContain("post_failure_comment");
     expect(action).toContain("post_completion_notification");
     expect(action).toContain('pr notify "$' + '{PR_SELECTOR}"');
@@ -41,6 +43,8 @@ describe("GitHub Action PR review wrapper", () => {
     expect(action).toContain("<!-- mar-review-status -->");
     expect(action).toContain("MAR multi-agent review");
     expect(action).toContain("MAR multi-agent review in progress");
+    expect(action).toContain("MAR multi-agent review completed");
+    expect(action).toContain("posted a unified PR review");
     expect(action).toContain("MAR multi-agent review failed");
     expect(action).toContain("Open the workflow run logs");
     expect(action).toContain("issues/$" + "{pr_number}/comments");
