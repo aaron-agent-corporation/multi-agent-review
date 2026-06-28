@@ -9,6 +9,8 @@ import { GrokJson } from "../src/schema/turn.js";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-grok.mjs", import.meta.url));
 const TEST_HOME = mkdtempSync(join(tmpdir(), "mar-grok-test-home-"));
+const TEST_GROK_RUNTIME_HOME = join(TEST_HOME, ".grok", "mar-runtime");
+const TEST_GROK_HOME = join(TEST_GROK_RUNTIME_HOME, ".grok");
 
 afterAll(() => {
   rmSync(TEST_HOME, { recursive: true, force: true });
@@ -110,12 +112,12 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
     expect(argv).not.toContain("--always-approve");
     expect(opts.reject).toBe(false);
     expect(opts.timeout).toBe(5000);
-    expect(opts.env.HOME).toContain("mar-grok-home-");
-    expect(opts.env.GROK_HOME).toBe(join(TEST_HOME, ".grok", "mar-runtime"));
-    expect(opts.env.MAR_GROK_HOME).toBe(join(TEST_HOME, ".grok", "mar-runtime"));
+    expect(opts.env.HOME).toBe(TEST_GROK_RUNTIME_HOME);
+    expect(opts.env.GROK_HOME).toBe(TEST_GROK_HOME);
+    expect(opts.env.MAR_GROK_HOME).toBe(TEST_GROK_RUNTIME_HOME);
     expect(opts.env.GROK_CURSOR_MCPS_ENABLED).toBe("0");
     expect(opts.env.GROK_CLAUDE_MCPS_ENABLED).toBe("0");
-    expect(existsSync(observedHome)).toBe(false);
+    expect(existsSync(observedHome)).toBe(true);
 
     vi.doUnmock("execa");
     vi.resetModules();
@@ -125,10 +127,14 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
     let observedHome = "";
     const sourceHome = mkdtempSync(join(tmpdir(), "mar-grok-source-"));
     const sourceGrokHome = join(sourceHome, ".grok");
+    const runtimeHome = join(sourceGrokHome, "mar-runtime");
+    const runtimeGrokHome = join(runtimeHome, ".grok");
     mkdirSync(sourceGrokHome, { recursive: true });
     writeFileSync(join(sourceGrokHome, "auth.json"), '{"token":"test"}');
     const execaMock = vi.fn().mockImplementation((_bin, _argv, opts) => {
       observedHome = opts.env.HOME;
+      expect(opts.env.HOME).toBe(runtimeHome);
+      expect(opts.env.GROK_HOME).toBe(runtimeGrokHome);
       const config = readFileSync(`${opts.env.GROK_HOME}/config.toml`, "utf8");
       expect(config).toContain("[compat.cursor]");
       expect(config).toContain("mcps = false");
@@ -168,12 +174,14 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
     let observedHome = "";
     const sourceHome = mkdtempSync(join(tmpdir(), "mar-grok-source-"));
     const sourceGrokHome = join(sourceHome, ".grok");
-    const runtimeGrokHome = join(sourceGrokHome, "mar-runtime");
+    const runtimeHome = join(sourceGrokHome, "mar-runtime");
+    const runtimeGrokHome = join(runtimeHome, ".grok");
     mkdirSync(sourceGrokHome, { recursive: true });
     writeFileSync(join(sourceGrokHome, "auth.json"), '{"token":"stale"}');
 
     const execaMock = vi.fn().mockImplementation((_bin, _argv, opts) => {
       observedHome = opts.env.HOME;
+      expect(opts.env.HOME).toBe(runtimeHome);
       expect(opts.env.GROK_HOME).toBe(runtimeGrokHome);
       writeFileSync(join(opts.env.GROK_HOME, "auth.json"), '{"token":"refreshed"}');
       return Promise.resolve({
@@ -196,7 +204,7 @@ describe("makeGrokAdapter (against fake-grok fixture)", () => {
       });
 
       expect(execaMock).toHaveBeenCalledTimes(1);
-      expect(existsSync(observedHome)).toBe(false);
+      expect(existsSync(observedHome)).toBe(true);
       expect(readFileSync(join(runtimeGrokHome, "auth.json"), "utf8")).toBe(
         '{"token":"refreshed"}',
       );

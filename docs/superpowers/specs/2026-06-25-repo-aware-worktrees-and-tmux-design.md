@@ -126,9 +126,9 @@ ANTHROPIC_API_KEY=
 GEMINI_API_KEY=
 GOOGLE_CLOUD_PROJECT=
 XAI_API_KEY=
-GROK_API_KEY=
+GROK_API_KEY=    # accepted as an alias for XAI_API_KEY for Grok headless auth
 MAR_CODEX_HOME=
-MAR_GROK_HOME=
+MAR_GROK_HOME=   # optional persistent isolated Grok home; credentials live under $MAR_GROK_HOME/.grok/
 MAR_CLAUDE_CONFIG_DIR=
 MAR_GEMINI_CONFIG_DIR=
 ```

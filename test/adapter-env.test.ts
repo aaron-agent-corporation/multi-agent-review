@@ -23,6 +23,7 @@ function mockExeca(stdout: string) {
 
 const grokSourceHome = mkdtempSync(join(tmpdir(), "mar-grok-env-source-"));
 const grokHome = join(grokSourceHome, "runtime");
+const grokConfigHome = join(grokHome, ".grok");
 
 const req = {
   agent: "x",
@@ -32,6 +33,7 @@ const req = {
   timeoutMs: 1000,
   env: {
     ANTHROPIC_API_KEY: "secret",
+    GROK_API_KEY: "grok-secret",
     HOME: grokSourceHome,
     MAR_CODEX_HOME: "/tmp/codex-home",
     MAR_GROK_HOME: grokHome,
@@ -80,7 +82,9 @@ describe("adapter env threading", () => {
     expect(calls[0].opts.env).toMatchObject({
       ANTHROPIC_API_KEY: "secret",
       MAR_GROK_HOME: grokHome,
-      GROK_HOME: grokHome,
+      HOME: grokHome,
+      GROK_HOME: grokConfigHome,
+      XAI_API_KEY: "grok-secret",
     });
   });
 });

@@ -60,6 +60,10 @@ type GrokRuntime = {
   cleanup: () => Promise<void>;
 };
 
+function nonEmpty(value: string | undefined): string | undefined {
+  return value && value.trim().length > 0 ? value : undefined;
+}
+
 async function mtimeMs(path: string): Promise<number | undefined> {
   try {
     return (await stat(path)).mtimeMs;
@@ -81,17 +85,31 @@ async function copyIfSourceNewer(source: string, destination: string): Promise<v
 async function prepareIsolatedGrokRuntime(
   env: Record<string, string> | undefined,
 ): Promise<GrokRuntime> {
-  const sourceHome = env?.HOME ?? process.env.HOME;
+  const sourceHome = nonEmpty(env?.HOME) ?? nonEmpty(process.env.HOME);
   const sourceGrokHome =
-    env?.GROK_HOME ?? process.env.GROK_HOME ?? (sourceHome ? join(sourceHome, ".grok") : undefined);
-  const tempHome = await mkdtemp(join(tmpdir(), "mar-grok-home-"));
-  const runtimeGrokHome =
-    env?.MAR_GROK_HOME ??
-    process.env.MAR_GROK_HOME ??
-    (sourceGrokHome ? join(sourceGrokHome, "mar-runtime") : join(tempHome, ".grok"));
+    nonEmpty(env?.GROK_HOME) ??
+    nonEmpty(process.env.GROK_HOME) ??
+    (sourceHome ? join(sourceHome, ".grok") : undefined);
+  let cleanup = async () => {};
+  let runtimeHome =
+    nonEmpty(env?.MAR_GROK_HOME) ??
+    nonEmpty(process.env.MAR_GROK_HOME) ??
+    (sourceGrokHome ? join(sourceGrokHome, "mar-runtime") : undefined);
+  if (!runtimeHome) {
+    runtimeHome = await mkdtemp(join(tmpdir(), "mar-grok-home-"));
+    const tempRuntimeHome = runtimeHome;
+    cleanup = () => rm(tempRuntimeHome, { recursive: true, force: true });
+  }
+  const runtimeGrokHome = join(runtimeHome, ".grok");
+  const xaiApiKey =
+    nonEmpty(env?.XAI_API_KEY) ??
+    nonEmpty(process.env.XAI_API_KEY) ??
+    nonEmpty(env?.GROK_API_KEY) ??
+    nonEmpty(process.env.GROK_API_KEY);
 
-  // HOME is temporary to hide ~/.claude and ~/.cursor compatibility imports; GROK_HOME is
-  // persistent so OAuth/device-token refreshes survive across MAR turns and workflow runs.
+  // HOME is persistent and isolated: this hides ~/.claude and ~/.cursor compatibility imports
+  // while preserving Grok OAuth/device-token refreshes whether the CLI resolves auth from HOME
+  // or from GROK_HOME.
   await mkdir(runtimeGrokHome, { recursive: true });
   if (sourceGrokHome && sourceGrokHome !== runtimeGrokHome) {
     await copyIfSourceNewer(join(sourceGrokHome, "auth.json"), join(runtimeGrokHome, "auth.json"));
@@ -114,11 +132,12 @@ async function prepareIsolatedGrokRuntime(
       GROK_CLAUDE_AGENTS_ENABLED: "0",
       GROK_CLAUDE_MCPS_ENABLED: "0",
       GROK_CLAUDE_HOOKS_ENABLED: "0",
-      MAR_GROK_HOME: runtimeGrokHome,
-      HOME: tempHome,
+      MAR_GROK_HOME: runtimeHome,
+      HOME: runtimeHome,
       GROK_HOME: runtimeGrokHome,
+      ...(xaiApiKey ? { XAI_API_KEY: xaiApiKey } : {}),
     },
-    cleanup: () => rm(tempHome, { recursive: true, force: true }),
+    cleanup,
   };
 }
 
